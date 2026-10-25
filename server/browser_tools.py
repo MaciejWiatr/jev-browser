@@ -25,6 +25,8 @@ from browser_harness.helpers import cdp, drain_events
 
 from jev_ultrafast.browser import Browser, StalePage
 
+import memory as mem
+
 CURSOR_HELPER = Path(__file__).with_name("cursor") / "cursor.bundle.js"
 SESSION = os.urandom(4).hex()
 GROUP_TITLE = os.environ.get("JEV_GROUP_TITLE") or f"Jev · {Path.cwd().name}".replace("|", "/")
@@ -84,6 +86,7 @@ class Tab:
         self.dialog = None
         self.page = None
         self.frames = None
+        self.trail = deque(maxlen=100)
         self.pointer = {"x": 560, "y": 390}
         # Register before the first navigation so its console/network events are routed here.
         TABS[self.id] = self
@@ -456,6 +459,10 @@ def read_page(tab_id, include_text=True):
         result["visible_text"] = page["text"]
     if gate["file_inputs"]:
         result["file_inputs"] = gate["file_inputs"]
+    remembered = mem.known(page["url"])
+    if remembered["actions_here"] or remembered["workflows"]:
+        result["memory"] = {"actions_here": remembered["actions_here"], "workflows": list(remembered["workflows"]),
+                            "use": "act(intent) / run_workflow(name) instead of finding these again"}
     if gate["login"] or gate["captcha"]:
         result["needs_user"] = ("captcha" if gate["captcha"] else "login") + \
             ": STOP and ask the user to complete it in Chrome, then continue."
@@ -669,10 +676,13 @@ def press(tab, combo):
 
 
 def computer(tab_id, action, ref=None, coordinate=None, text=None, direction="down", amount=3,
-             duration=1.0, region=None, save_path=None):
-    """Returns (summary dict, optional image bytes)."""
+             duration=1.0, region=None, save_path=None, intent=None):
+    """Returns (summary dict, optional image bytes). intent: remember (or recall) the target under this name."""
     tab = get_tab(tab_id)
     pump()
+    url_before = tab.info()["url"]
+    if intent and not ref and not coordinate and action not in {"screenshot", "zoom", "wait", "key"}:
+        ref = recall(tab, intent)
     if action == "screenshot":
         data = tab.screenshot()
         result = {"tab_id": tab.id, "url": tab.info()["url"]}
@@ -696,10 +706,12 @@ def computer(tab_id, action, ref=None, coordinate=None, text=None, direction="do
     if action == "type":
         if text is None:
             raise ToolError("type needs text.")
+        known = None
         if ref:
-            ref, _, spot = resolve(tab, ref)
+            ref, known, spot = resolve(tab, ref)
             mouse(tab, spot["x"], spot["y"], box=spot["box"])
         tab.call("Input.insertText", text=text)
+        learn(tab, url_before, intent, known, "type")
         return _after(tab, {"typed_chars": len(text), "into": ref or "focused element"})
     if action == "scroll":
         if ref:
@@ -726,7 +738,8 @@ def computer(tab_id, action, ref=None, coordinate=None, text=None, direction="do
     button, count = clicks[action]
     mouse(tab, x, y, button, count, box=box)
     target = known["label"] if known else f"({x:.0f}, {y:.0f})"
-    return _after(tab, {action: target})
+    learned = learn(tab, url_before, intent, known, action)
+    return _after(tab, {action: target, **({"learned": learned} if learned else {})})
 
 
 def _after(tab, result):
@@ -740,8 +753,13 @@ def _after(tab, result):
     return result, None
 
 
-def form_input(tab_id, ref, value):
+def form_input(tab_id, ref=None, value=None, intent=None):
     tab = get_tab(tab_id)
+    url_before = tab.info()["url"]
+    if not ref:
+        if not intent:
+            raise ToolError("form_input needs a ref from read_page, or an intent it has learned.")
+        ref = recall(tab, intent)
     ref, known, spot = resolve(tab, ref)
     node = int(ref[1:])
     if spot["tag"] == "SELECT":
@@ -756,16 +774,19 @@ def form_input(tab_id, ref, value):
         }})({node}, {json.dumps(str(value))})""")
         if chosen is None:
             raise ToolError(f"No enabled option {value!r} in {ref}. Options: {known and known['options']}")
+        learn(tab, url_before, intent, known, "select")
         return _after(tab, {"selected": chosen, "ref": ref})
     if spot["type"] in {"checkbox", "radio"}:
         want = value if isinstance(value, bool) else str(value).lower() in {"true", "1", "yes", "on", "checked"}
         if bool(spot["checked"]) != want:
             mouse(tab, spot["x"], spot["y"], box=spot["box"])
+        learn(tab, url_before, intent, known, "check")
         return _after(tab, {"checked": want, "ref": ref})
     mouse(tab, spot["x"], spot["y"], box=spot["box"])
     press(tab, "cmd+a" if sys.platform == "darwin" else "ctrl+a")
     press(tab, "Delete")
     tab.call("Input.insertText", text=str(value))
+    learn(tab, url_before, intent, known, "fill")
     return _after(tab, {"filled": ref, "label": known and known["label"], "chars": len(str(value))})
 
 
@@ -821,6 +842,119 @@ def file_upload(tab_id, paths, input_index=0):
         raise ToolError(f"No file input #{input_index} on the page. read_page lists file_inputs.")
     tab.call("DOM.setFileInputFiles", files=files, objectId=object_id)
     return _after(tab, {"uploaded": [Path(f).name for f in files], "bytes": total})[0]
+
+
+# ---------- memory: learned actions and workflows ----------
+
+def learn(tab, url, intent, known, kind):
+    """Short-term: append to the tab's trail. Long-term: remember intent -> element for this page type."""
+    target = {"role": known["role"], "label": known["label"]} if known else None
+    tab.trail.append({"step": len(tab.trail), "do": kind, "target": target, "intent": intent, "url": url})
+    if intent and target:
+        return mem.remember(url, intent, {**target, "kind": kind})
+    return None
+
+
+def _words(text):
+    return set(re.findall(r"\w+", (text or "").lower()))
+
+
+def match_element(page, entry):
+    """Find the remembered element again: exact role+label, then case-insensitive, then shared words."""
+    els = list(elements(page).values())
+    role, label = entry.get("role"), entry.get("label", "")
+    for test in (lambda e: e["role"] == role and e["label"] == label,
+                 lambda e: e["role"] == role and e["label"].lower() == label.lower(),
+                 lambda e: e["label"].lower() == label.lower()):
+        found = [e for e in els if test(e)]
+        if found:
+            return found[0]["ref"]
+    for words in (set(entry.get("core") or []), _words(entry.get("intent"))):
+        if len(words) >= 2:
+            found = [e for e in els if e["role"] == role and words <= _words(e["label"])]
+            if len(found) == 1 or (found and words == set(entry.get("core") or [])):
+                return found[0]["ref"]
+    want = _words(label)
+    scored = sorted(((len(want & _words(e["label"])) / max(len(want | _words(e["label"])), 1), e)
+                     for e in els if e["role"] == role), key=lambda s: -s[0])
+    if scored and scored[0][0] >= 0.6:
+        return scored[0][1]["ref"]
+    return None
+
+
+def recall(tab, intent):
+    url = tab.info()["url"]
+    entry = mem.lookup(url, intent)
+    if not entry:
+        known = mem.known(url)
+        raise ToolError(f"No learned action {intent!r} for this page yet. Known here: {known['actions_here']}. "
+                        "Use read_page/find, then act with a ref and pass intent to teach it.")
+    ref = match_element(tab.observe(), entry)
+    if not ref:
+        raise ToolError(f"Learned target for {intent!r} ({entry['role']} {entry['label']!r}) is not on this page. "
+                        "Use read_page, then act with a ref and the same intent to re-teach it.")
+    mem.hit(url, intent, entry["page"])
+    return ref
+
+
+def act(tab_id, intent, value=None):
+    """Do a learned action by name in one call."""
+    tab = get_tab(tab_id)
+    entry = mem.lookup(tab.info()["url"], intent)
+    if not entry:
+        recall(tab, intent)  # raises the helpful miss message
+    kind = entry.get("kind", "left_click")
+    if kind in {"fill", "select", "check"}:
+        if value is None:
+            raise ToolError(f"{intent!r} is a {kind} action; pass value.")
+        result = form_input(tab_id, value=value, intent=intent)[0]
+    elif kind == "type":
+        result = computer(tab_id, "type", text=str(value or ""), intent=intent)[0]
+    else:
+        action = kind if kind in {"left_click", "double_click", "right_click", "hover", "triple_click"} else "left_click"
+        result = computer(tab_id, action, intent=intent)[0]
+    return {"intent": intent, "from_memory": True, "learned_on": entry["page"], **result}
+
+
+def run_workflow(tab_id, name, params=None):
+    tab = get_tab(tab_id)
+    flow, site = mem.workflow(tab.info()["url"], name)
+    if not flow:
+        raise ToolError(f"No workflow {name!r} for {site}. site_memory lists what exists.")
+    params = params or {}
+    missing = [p for p in flow.get("params", []) if p not in params]
+    if missing:
+        raise ToolError(f"Workflow {name!r} needs params: {missing}")
+
+    def fill(v):
+        return re.sub(r"\{\{(\w+)\}\}", lambda m: str(params[m.group(1)]), v) if isinstance(v, str) else v
+
+    done = []
+    for i, step in enumerate(flow["steps"]):
+        try:
+            if "navigate" in step:
+                tab.navigate(fill(step["navigate"]))
+                done.append({"step": i, "navigate": tab.info()["url"]})
+                continue
+            out = act(tab_id, step["intent"], fill(step.get("value")))
+            tab.wait_loaded(timeout=8)
+            done.append({"step": i, "intent": step["intent"], "url": out.get("url")})
+        except ToolError as exc:
+            return {"workflow": name, "completed": i, "of": len(flow["steps"]), "stopped": str(exc),
+                    "remaining": flow["steps"][i:], "done": done,
+                    "hint": "Finish the remaining steps by hand with intent= so memory heals, then re-save if needed."}
+        if tab.dialog:
+            return {"workflow": name, "completed": i + 1, "of": len(flow["steps"]), "dialog_open": tab.dialog, "done": done}
+    return {"workflow": name, "completed": len(flow["steps"]), "of": len(flow["steps"]), "done": done,
+            "url": tab.info()["url"]}
+
+
+def site_memory(tab_id=None, url=None, trail=True):
+    url = url or get_tab(tab_id).info()["url"]
+    out = mem.known(url)
+    if tab_id and trail:
+        out["recent_actions_this_session"] = list(get_tab(tab_id).trail)[-30:]
+    return out
 
 
 # ---------- GIF recording ----------

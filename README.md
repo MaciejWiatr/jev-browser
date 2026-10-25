@@ -11,6 +11,7 @@ A Claude Code plugin that gives Claude the full [Claude in Chrome](https://code.
 - **Separate cursor.** Input goes straight into the tab through CDP. Your macOS cursor never moves. The page shows its own orange agent cursor.
 - **Human mode, when a site needs it.** For sites that react to robotic mouse movement, say "switch to human mode": curved paths with overshoot and varied timing from [ghost-cursor](https://github.com/Xetera/ghost-cursor), about 0.7 s per move. Claude still stops at CAPTCHAs and hands them to you. `JEV_CURSOR_MODE=natural` makes it the default.
 - **Tab groups.** Each Claude session's tabs go into an orange group named `Jev · <project folder>`.
+- **Learns sites.** Each action Claude names ("add to cart") is remembered per page type, so it applies to every product page, not just one. Next time it's a single `act` call, and multi-step flows replay with `run_workflow`. Memory lives in `~/.jev/memory` and never stores what you typed.
 - **Your logins.** Claude works in the Chrome profile you're already signed into. It stops and hands over at login pages and CAPTCHAs.
 - **Loaded automatically.** Installed at user level, so every Claude Code session has the tools without extra flags.
 
@@ -81,6 +82,7 @@ Claude goes ultra-fast first: it starts with `jev_run`. It falls back to the ste
 | Tabs | `tabs_context`, `tabs_create`, `tabs_close`, `navigate` (url, back, forward, reload), `resize_window` |
 | Read | `read_page` (elements with refs like `[n12]`, visible text, login/CAPTCHA detection), `get_page_text`, `find` |
 | Act | `computer` (click, type, key, scroll, hover, wait, screenshot, zoom), `form_input`, `javascript_tool`, `file_upload`, `browser_batch` |
+| Memory | `act`, `save_workflow`, `run_workflow`, `site_memory`; `intent=` on `computer` and `form_input` teaches it |
 | Debug | `read_console_messages`, `read_network_requests`, `gif_creator`, `handle_dialog` |
 | Agent and setup | `jev_run`, `jev_status` (status and reconnect, like `/chrome`), `set_cursor_mode`, `jev_inspector` |
 
@@ -112,6 +114,7 @@ Set these in the `env` section of your Claude Code settings. The cursor mode can
 | `JEV_CURSOR_MAX_MS` | `600` | Natural mode: longest time one cursor move may take |
 | `JEV_GROUP_TITLE` | `Jev · <folder>` | Tab group name |
 | `JEV_VIEWPORT` | fills the window | Pin a fixed page size, e.g. `1440x900` (`jev_run` always uses 1120x780 while it runs) |
+| `JEV_MEMORY_DIR` | `~/.jev/memory` | Learned actions and workflows, one JSON file per site |
 | `JEV_SITES_FILE` | `~/.config/jev/sites.json` | Site allow/deny rules |
 
 ## Troubleshooting

@@ -26,6 +26,13 @@ The step-by-step tools also default to speed mode (instant cursor moves).
 4. Verify after each meaningful step with `read_page`, `computer screenshot`, or `get_page_text`. Refs go stale after the page changes; read again.
 5. Several known steps in a row → `browser_batch`.
 
+## Memory: get faster on every visit
+
+- **Teach while you work:** pass `intent` ("add to cart", "search box", "next page", "checkout") on every meaningful `computer` click/type and `form_input`. The target is remembered for that page type, so it works on every product page, not just this one.
+- **Reuse first:** `read_page` shows `memory.actions_here`. Use `act(tab, intent, value)` for those in one call instead of finding them again.
+- **Workflows:** after a multi-step flow works, `save_workflow` it from intents with `{{param}}` placeholders for anything that changes or is personal (never literal personal data), then `run_workflow` next time. If it stops, finish the remaining steps by hand with `intent=` (that heals memory).
+- `site_memory` shows what is known plus this tab's recent actions; `forget_intent` / `forget_workflow` remove bad entries.
+
 Other tools: `find` (refs by description), `get_page_text` (whole page, paginated), `read_console_messages` (always pass a `pattern` or `only_errors`), `read_network_requests` (`url_pattern`, `only_failed`), `resize_window` (mobile checks: 390x844), `computer zoom` (2x region), `computer screenshot save_path=...` (PNG to disk), `gif_creator` (start_recording → actions → stop_recording → export), `handle_dialog`.
 
 ## Stop and hand over

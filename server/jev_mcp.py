@@ -128,6 +128,7 @@ def computer(
     duration: float = 1.0,
     region: list[float] | None = None,
     save_path: str | None = None,
+    intent: str | None = None,
 ) -> Any:
     """Mouse, keyboard and screenshots in a tab.
     - screenshot: returns the image; save_path also writes a PNG to disk.
@@ -135,14 +136,19 @@ def computer(
     - type: insert text into ref (clicked first) or the focused element.
     - key: text like 'Enter', 'cmd+a', 'shift+Tab'; space-separated for a sequence.
     - scroll: direction + amount (notches) at coordinate, or ref to scroll it into view.
-    - wait: duration seconds (max 10). zoom: region [x0, y0, x1, y1] at 2x."""
-    return _with_image(bt.computer(tab_id, action, ref, coordinate, text, direction, amount, duration, region, save_path))
+    - wait: duration seconds (max 10). zoom: region [x0, y0, x1, y1] at 2x.
+    - intent: a short name for what this does ("add to cart", "search box"). With a ref, the target is learned for
+      this page type; without a ref, a learned target is reused. Pass it on every meaningful click/type."""
+    return _with_image(bt.computer(tab_id, action, ref, coordinate, text, direction, amount, duration, region, save_path,
+                                   intent))
 
 
 @browser_tool
-def form_input(tab_id: str, ref: str, value: str | bool) -> dict:
-    """Set a form field by ref: text inputs (replaces content), selects (option label or value), checkboxes/radios (true/false)."""
-    return bt.form_input(tab_id, ref, value)[0]
+def form_input(tab_id: str, value: str | bool, ref: str | None = None, intent: str | None = None) -> dict:
+    """Set a form field: text inputs (replaces content), selects (option label or value), checkboxes/radios
+    (true/false). Target it by ref from read_page, or by a learned intent ("email field"); passing intent with a
+    ref teaches it."""
+    return bt.form_input(tab_id, ref, value, intent)[0]
 
 
 @browser_tool
@@ -181,6 +187,43 @@ def set_cursor_mode(mode: Literal["speed", "natural"] | None = None) -> dict:
         bt.CURSOR.enabled = mode == "natural"
     return {"cursor_mode": "natural" if bt.CURSOR.enabled else "speed",
             "note": "Applies to this Claude session. Default for new sessions: JEV_CURSOR_MODE env var."}
+
+
+# ---------- memory ----------
+
+@browser_tool
+def act(tab_id: str, intent: str, value: str | bool | None = None) -> dict:
+    """Do a learned action in one call, e.g. act(tab, "add to cart") or act(tab, "search box", "running shoes").
+    Works on any page of the same type (product pages share "add to cart"). read_page lists what is known.
+    On a miss it says so: then use read_page + computer/form_input with ref and intent to teach it."""
+    return bt.act(tab_id, intent, value)
+
+
+@browser_tool
+def save_workflow(tab_id: str, name: str, description: str, steps: list[dict]) -> dict:
+    """Save a reusable workflow for the current site from learned intents. Each step is {"intent": ..., "value": ...}
+    or {"navigate": url}. Use {{param}} placeholders for anything that changes or is personal, e.g.
+    [{"navigate": "https://shop.example.com"}, {"intent": "search box", "value": "{{query}}"},
+     {"intent": "first result"}, {"intent": "add to cart"}]."""
+    return bt.mem.save_workflow(bt.get_tab(tab_id).info()["url"], name, description, steps)
+
+
+@browser_tool
+def run_workflow(tab_id: str, name: str, params: dict | None = None) -> dict:
+    """Replay a saved workflow for the current site in one call. Stops at the first step that no longer matches and
+    returns the remaining steps, so you can finish them by hand (with intent=, which heals memory)."""
+    return bt.run_workflow(tab_id, name, params)
+
+
+@browser_tool
+def site_memory(tab_id: str | None = None, url: str | None = None, forget_intent: str | None = None,
+                forget_workflow: str | None = None) -> dict:
+    """What jev remembers for a site: learned actions on this page type and elsewhere on the site, saved workflows,
+    and this tab's recent actions (short-term memory). forget_intent / forget_workflow remove an entry."""
+    target = url or bt.get_tab(tab_id).info()["url"]
+    if forget_intent or forget_workflow:
+        return bt.mem.forget(target, forget_intent, forget_workflow)
+    return bt.site_memory(tab_id, url)
 
 
 # ---------- debugging ----------

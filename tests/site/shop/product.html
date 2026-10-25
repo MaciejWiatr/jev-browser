@@ -1,0 +1,17 @@
+<!doctype html><html><head><title>Jev Shop</title></head><body>
+<h1 id="title">Product</h1>
+<p>Cart: <span id="cart">0</span></p>
+<button id="add">Add to cart</button>
+<a href="index.html">Back to shop</a>
+<script>
+  const names = {A1B2C3: 'Red Shoe', Z9Y8X7: 'Blue Mug', Q5W6E7: 'Green Hat'};
+  const id = new URLSearchParams(location.search).get('id') || location.hash.slice(1);
+  const name = names[id] || 'Thing';
+  document.getElementById('title').textContent = name;
+  const add = document.getElementById('add');
+  add.setAttribute('aria-label', 'Add ' + name + ' to cart');
+  const cart = () => Number(localStorage.getItem('jev-cart') || 0);
+  document.getElementById('cart').textContent = cart();
+  add.onclick = () => { localStorage.setItem('jev-cart', cart() + 1); document.getElementById('cart').textContent = cart(); };
+</script>
+</body></html>

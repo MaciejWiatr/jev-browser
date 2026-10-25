@@ -8,6 +8,7 @@ import asyncio
 import functools
 import http.server
 import json
+import os
 import re
 import tempfile
 import threading
@@ -41,7 +42,8 @@ def check(name, ok, detail=""):
 async def main():
     base = serve()
     out = Path(tempfile.mkdtemp(prefix="jev-e2e-"))
-    params = StdioServerParameters(command=str(ROOT / "server" / "run.sh"), cwd=str(out))
+    env = {**os.environ, "JEV_MEMORY_DIR": str(out / "memory")}  # events dir stays shared: other sessions relay into it
+    params = StdioServerParameters(command=str(ROOT / "server" / "run.sh"), cwd=str(out), env=env)
     async with stdio_client(params) as (r, w), ClientSession(r, w) as s:
         await s.initialize()
 
@@ -53,7 +55,7 @@ async def main():
             return (data, images) if tool == "computer" else data
 
         tools = {t.name for t in (await s.list_tools()).tools}
-        check("21 tools listed", len(tools) == 21, sorted(tools))
+        check("25 tools listed", len(tools) == 25, sorted(tools))
         modes = [(await call("set_cursor_mode", mode=m))["cursor_mode"] for m in ("natural", "speed")]
         check("cursor mode switchable", modes == ["natural", "speed"], modes)
 
@@ -106,6 +108,36 @@ async def main():
         await call("gif_creator", tab_id=tab, action="stop_recording")
         gif = await call("gif_creator", tab_id=tab, action="export", filename=str(out / "run.gif"))
         check("gif exported", Path(gif.get("saved", "")).exists(), gif)
+
+        # Memory: learn "add to cart" on one product, reuse it on others, then as a workflow.
+        shop = base + "/shop/product.html?id="
+        await call("navigate", tab_id=tab, url=shop + "A1B2C3")
+        await call("javascript_tool", tab_id=tab, code="localStorage.setItem('jev-cart', 0); location.reload()")
+        await call("navigate", tab_id=tab, url="reload")
+        add = (await call("find", tab_id=tab, query="add to cart"))["matches"][0]["ref"]
+        taught, _ = await call("computer", tab_id=tab, action="left_click", ref=add, intent="add to cart")
+        check("action learned from a click", bool(taught.get("learned")), taught)
+        cart = lambda: call("javascript_tool", tab_id=tab, code="document.getElementById('cart').textContent")
+
+        await call("navigate", tab_id=tab, url=shop + "Z9Y8X7")
+        page = await call("read_page", tab_id=tab, include_text=False)
+        check("read_page shows learned actions", "add to cart" in page.get("memory", {}).get("actions_here", []), page)
+        reused = await call("act", tab_id=tab, intent="add to cart")
+        check("act reuses it on another product (different label)", reused.get("from_memory") and
+              (await cart())["result"] == "2", reused)
+
+        flow = await call("save_workflow", tab_id=tab, name="add product", description="Open a product and add it",
+                          steps=[{"navigate": shop + "{{id}}"}, {"intent": "add to cart"}])
+        check("workflow saved with params", flow.get("params") == ["id"], flow)
+        ran = await call("run_workflow", tab_id=tab, name="add product", params={"id": "Q5W6E7"})
+        check("workflow replays in one call", ran.get("completed") == 2 and (await cart())["result"] == "3", ran)
+
+        miss = await call("act", tab_id=tab, intent="checkout")
+        check("unknown intent is a clear miss", "No learned action" in miss.get("error", ""), miss)
+        memory = await call("site_memory", tab_id=tab)
+        check("site_memory shows trail and workflows", memory["recent_actions_this_session"] and
+              "add product" in memory["workflows"], memory)
+        check("memory persisted to disk", any((out / "memory").glob("*.json")))
 
         await call("tabs_close", tab_id=tab)
         check("tab closed", not (await call("tabs_context"))["tabs"])
