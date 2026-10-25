@@ -41,6 +41,16 @@ mcp = FastMCP(
 )
 
 
+def _memory_hint(url):
+    known = bt.mem.known(url)
+    if not (known["actions_here"] or known["workflows"] or known["actions_elsewhere_on_site"]):
+        return {}
+    return {"memory": {"actions_here": known["actions_here"],
+                       "actions_elsewhere_on_site": known["actions_elsewhere_on_site"],
+                       "workflows": list(known["workflows"]),
+                       "use": "act(tab, intent, url=...) directly: no read_page needed"}}
+
+
 def browser_tool(fn):
     """Run a sync browser primitive in a worker thread, serialized, with errors returned as text."""
 
@@ -79,7 +89,8 @@ def tabs_create(url: str = "about:blank", activate: bool = False) -> dict:
     """Open a new tab in the user's Chrome, optionally at url. Returns its tab_id.
     The tab opens in the background so the agent's input never mixes with the user's keyboard and cursor.
     activate=true brings it to the front (steals focus); use only when the user asks to watch."""
-    return bt.tabs_create(url, activate)
+    info = bt.tabs_create(url, activate)
+    return {**info, **_memory_hint(info.get("url"))}
 
 
 @browser_tool
@@ -93,11 +104,7 @@ def navigate(tab_id: str, url: str) -> dict:
     """Go to url in the tab. url can also be 'back', 'forward' or 'reload'. Waits for load."""
     tab = bt.get_tab(tab_id)
     tab.navigate(url)
-    known = bt.mem.known(tab.info()["url"])
-    return {**tab.info(), **({"dialog_open": tab.dialog} if tab.dialog else {}),
-            **({"memory": {"actions_here": known["actions_here"], "workflows": list(known["workflows"]),
-                           "use": "act(intent) directly, no read_page needed"}}
-               if known["actions_here"] or known["workflows"] else {})}
+    return {**tab.info(), **({"dialog_open": tab.dialog} if tab.dialog else {}), **_memory_hint(tab.info()["url"])}
 
 
 # ---------- reading ----------
