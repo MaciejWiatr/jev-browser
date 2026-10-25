@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "Jev Tab Groups",
+  "version": "0.1.0",
+  "description": "Groups tabs opened by the Jev MCP server (Claude Code) into one tab group per session.",
+  "permissions": ["tabs", "tabGroups", "storage"],
+  "background": { "service_worker": "jev-tabgroups-sw.js" }
+}

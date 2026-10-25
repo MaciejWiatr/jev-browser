@@ -1,0 +1,12 @@
+<!doctype html><html><head><title>Jev Test</title></head><body>
+<h1>Test form</h1>
+<label>Name <input id="name" name="nickname-demo" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore></label>
+<label>Country <select id="country"><option>Poland</option><option>Germany</option><option>Spain</option></select></label>
+<label><input type="checkbox" id="news"> Newsletter</label>
+<button id="go" onclick="document.getElementById('out').textContent='Hello '+document.getElementById('name').value+' from '+country.value+' news='+news.checked; console.log('submitted', name.value)">Submit</button>
+<button id="dlg" onclick="confirm('Really?')">Confirm me</button>
+<input type="file" id="up" onchange="document.getElementById('out').textContent='file:'+this.files[0].name">
+<p id="out"></p>
+<a href="page2.html">Next page</a>
+<script>console.error('boom on load'); fetch('/missing.json');</script>
+</body></html>

@@ -1,0 +1,12 @@
+{
+  "name": "jev-cursor-helper",
+  "private": true,
+  "description": "Builds cursor.bundle.js (ghost-cursor paths) used by the jev MCP server",
+  "scripts": {
+    "build": "esbuild cursor.js --bundle --platform=node --target=node18 --outfile=cursor.bundle.js --legal-comments=eof"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.10",
+    "ghost-cursor": "1.4.2"
+  }
+}

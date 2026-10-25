@@ -1,0 +1,29 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "jev-browser",
+  "owner": {
+    "name": "Maciej Wiatr",
+    "url": "https://github.com/MaciejWiatr"
+  },
+  "plugins": [
+    {
+      "name": "jev",
+      "description": "Jev Ultrafast browser agent as native tools: Claude-in-Chrome style tools + jev_run agent, background tabs, human cursor",
+      "version": "0.3.0",
+      "source": "./",
+      "homepage": "https://github.com/MaciejWiatr/jev-browser",
+      "category": "productivity",
+      "tags": [
+        "browser",
+        "chrome",
+        "automation",
+        "mcp",
+        "cdp",
+        "testing"
+      ]
+    }
+  ],
+  "metadata": {
+    "description": "Browser control for Claude Code in your real Chrome: background tabs, human-like cursor, tab groups, and the ultrafast Jev agent."
+  }
+}
