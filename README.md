@@ -72,7 +72,7 @@ Go to the product list, extract name, price and stock for every item into produc
 Record a GIF of the checkout flow up to the payment page, then stop.
 ```
 
-Claude chooses between `jev_run` (one fast autonomous run) and the step-by-step tools. The bundled skills tell it when to use which, when to stop for you, and how to check the result.
+Claude goes ultra-fast first: it starts with `jev_run`. It falls back to the step-by-step tools when a run gets blocked, or when the task needs debugging, uploads, recordings or a lot of judgment. The bundled skills tell it when to stop for you and how to check the result.
 
 ## Tools
 

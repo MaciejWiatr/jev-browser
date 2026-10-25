@@ -7,12 +7,16 @@ description: Control the user's real Chrome (their logins) in background tabs wi
 
 Tools from the `jev` MCP server. Tabs open in the **background**: they never steal the user's focus, keyboard or OS cursor. The page shows an orange agent cursor (instant moves by default: speed mode). If a site reacts to robotic input (bot checks, blocked clicks), or the user asks for human mode, call `set_cursor_mode('natural')`; switch back to `'speed'` afterwards. A CAPTCHA still means stop and hand over to the user.
 
-## Pick the approach
+## Default: ultra-fast first
 
-| Task | Use |
-| --- | --- |
-| One narrow goal on one site ("search flights X→Y", "open the article about Z") | `jev_run` (2-8 s, paid API calls). `keep_open: true` returns a `tab_id` to continue with the tools below. |
-| Anything needing inspection, verification, debugging, multi-step judgment | Step-by-step tools below |
+Start every web task with **`jev_run`** (2-8 s): give it the start URL and the goal in plain words, with concrete values and a stop condition. Use `keep_open: true` when you need to check or continue, then verify with `read_page`.
+
+Fall back to the step-by-step tools below only when:
+- `jev_run` returns `blocked`, errors, or the result doesn't match the goal;
+- the task needs judgment across many steps, debugging (console, network), uploads, recordings, or reading/extracting lots of data;
+- keys for `jev_run` are missing (`jev_status` shows `EMPTY`), or the user asks for step-by-step.
+
+The step-by-step tools also default to speed mode (instant cursor moves).
 
 ## Step-by-step loop
 

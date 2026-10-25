@@ -5,6 +5,7 @@ from read_page, which come from Jev's atomic DOM snapshot; refs never become sel
 """
 
 import base64
+import fcntl
 import fnmatch
 import io
 import json
@@ -86,6 +87,7 @@ class Tab:
         self.pointer = {"x": 560, "y": 390}
         # Register before the first navigation so its console/network events are routed here.
         TABS[self.id] = self
+        register_session(self.session)
         for domain in ("Page", "Runtime", "Log", "Network"):
             self.call(f"{domain}.enable")
         apply_viewport(self)
@@ -193,6 +195,7 @@ class Tab:
 
     def close(self):
         self.frames = None
+        unregister_session(self.session)
         try:
             self.browser.close()
         except Exception:
@@ -257,16 +260,65 @@ def close_session_tabs():
         url = tab.info().get("url") or ""
         if url in {"", "about:blank", "chrome://newtab/"}:
             tab.close()
+        unregister_session(tab.session)
 
 
 # ---------- events: console, network, dialogs ----------
+
+# Every jev server (one per Claude session) shares one Browser Harness daemon, and drain_events() empties its
+# buffer for everyone. Events for another server's tab are relayed through ~/.jev/events/<session>.jsonl:
+# each server registers its sessions by creating that file and reads it back on every pump.
+EVENTS_DIR = Path(os.environ.get("JEV_EVENTS_DIR", "~/.jev/events")).expanduser()
+RELAYED = ("Runtime.consoleAPICalled", "Runtime.exceptionThrown", "Log.entryAdded", "Network.requestWillBeSent",
+           "Network.responseReceived", "Network.loadingFailed", "Page.javascriptDialogOpening",
+           "Page.javascriptDialogClosed")
+
+
+def _spool(session):
+    return EVENTS_DIR / f"{re.sub(r'[^A-Za-z0-9]', '', session or '')}.jsonl"
+
+
+def register_session(session):
+    EVENTS_DIR.mkdir(parents=True, exist_ok=True)
+    _spool(session).touch()
+
+
+def unregister_session(session):
+    _spool(session).unlink(missing_ok=True)
+
+
+def _relay(event):
+    path = _spool(event.get("session_id"))
+    if event.get("method") not in RELAYED or not path.exists():
+        return
+    with open(path, "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        f.write(json.dumps(event) + "\n")
+
+
+def _collect(session):
+    try:
+        with open(_spool(session), "r+") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            lines = f.read().splitlines()
+            f.seek(0)
+            f.truncate()
+    except FileNotFoundError:
+        return []
+    return [json.loads(line) for line in lines if line.strip()]
+
 
 def pump():
     try:
         events = drain_events()
     except Exception:
-        return
+        events = []
     by_session = {tab.session: tab for tab in TABS.values()}
+    for event in events:
+        if event.get("session_id") not in by_session:
+            _relay(event)
+    for session in by_session:
+        events.extend(_collect(session))
     for event in events:
         tab = by_session.get(event.get("session_id"))
         if not tab:
@@ -571,9 +623,12 @@ def mouse(tab, x, y, button="left", clicks=1, modifiers=0, box=None):
                     button=button, clickCount=n, modifiers=modifiers)
             except Exception:
                 # A click that opens alert/confirm blocks until the dialog closes; report it instead of failing.
-                pump()
-                if tab.dialog:
-                    return
+                # Another jev server may drain the event first and relay it, so give that a moment.
+                for _ in range(15):
+                    pump()
+                    if tab.dialog:
+                        return
+                    time.sleep(0.1)
                 raise
 
 
