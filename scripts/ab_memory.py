@@ -49,7 +49,10 @@ def serve():
 def close_shop_tabs():
     for target in cdp("Target.getTargets")["targetInfos"]:
         if target["type"] == "page" and target["url"].startswith(ORIGIN):
-            cdp("Target.closeTarget", targetId=target["targetId"])
+            try:
+                cdp("Target.closeTarget", targetId=target["targetId"])
+            except RuntimeError:
+                pass  # already closed by its own session
 
 
 def cart(reset=False):
@@ -78,21 +81,28 @@ def run(arm, memory_dir, workdir):
     env = {**os.environ, "JEV_MEMORY_DIR": str(memory_dir)}
     started = time.monotonic()
     proc = subprocess.run(
-        ["claude", "-p", PROMPT, "--output-format", "json",
+        ["claude", "-p", PROMPT, "--output-format", "stream-json", "--verbose",
          "--allowedTools", "mcp__plugin_jev_jev", "--disallowedTools", "mcp__plugin_jev_jev__jev_run",
          "mcp__claude-in-chrome"],
         cwd=workdir, env=env, capture_output=True, text=True, timeout=900)
     wall = time.monotonic() - started
-    try:
-        out = json.loads(proc.stdout)
-    except ValueError:
-        out = {"is_error": True, "result": (proc.stdout or proc.stderr)[-400:]}
+    out, tools = {"is_error": True, "result": proc.stderr[-400:]}, []
+    for line in proc.stdout.splitlines():
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            continue
+        if msg.get("type") == "assistant":
+            tools += [c["name"].split("__")[-1] for c in msg["message"].get("content", []) if c.get("type") == "tool_use"]
+        elif msg.get("type") == "result":
+            out = msg
     usage = out.get("usage", {})
     return {"arm": arm, "wall_s": round(wall, 1), "turns": out.get("num_turns"),
             "cost_usd": out.get("total_cost_usd"),
             "tokens": sum(usage.get(k, 0) for k in ("input_tokens", "output_tokens", "cache_creation_input_tokens",
                                                    "cache_read_input_tokens")),
-            "error": out.get("is_error"), "reply": (out.get("result") or "")[-160:]}
+            "tool_calls": len(tools), "tools": tools,
+            "error": out.get("is_error"), "reply": (out.get("result") or "")[-120:]}
 
 
 def main():
@@ -126,7 +136,7 @@ def main():
             continue
         med = lambda k: statistics.median(r[k] for r in ok if r[k] is not None)
         print(f"  {label}: {len(ok)}/{runs} ok · wall {med('wall_s')} s · turns {med('turns')} · "
-              f"tokens {int(med('tokens'))} · cost ${med('cost_usd'):.3f}")
+              f"tool calls {med('tool_calls')} · tokens {int(med('tokens'))} · cost ${med('cost_usd'):.3f}")
     (work / "results.json").write_text(json.dumps(results, indent=1))
     print(f"\nraw: {work / 'results.json'}")
 

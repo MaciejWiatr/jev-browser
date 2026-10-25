@@ -89,7 +89,11 @@ def navigate(tab_id: str, url: str) -> dict:
     """Go to url in the tab. url can also be 'back', 'forward' or 'reload'. Waits for load."""
     tab = bt.get_tab(tab_id)
     tab.navigate(url)
-    return {**tab.info(), **({"dialog_open": tab.dialog} if tab.dialog else {})}
+    known = bt.mem.known(tab.info()["url"])
+    return {**tab.info(), **({"dialog_open": tab.dialog} if tab.dialog else {}),
+            **({"memory": {"actions_here": known["actions_here"], "workflows": list(known["workflows"]),
+                           "use": "act(intent) directly, no read_page needed"}}
+               if known["actions_here"] or known["workflows"] else {})}
 
 
 # ---------- reading ----------
@@ -192,11 +196,12 @@ def set_cursor_mode(mode: Literal["speed", "natural"] | None = None) -> dict:
 # ---------- memory ----------
 
 @browser_tool
-def act(tab_id: str, intent: str, value: str | bool | None = None) -> dict:
+def act(tab_id: str, intent: str, value: str | bool | None = None, url: str | None = None) -> dict:
     """Do a learned action in one call, e.g. act(tab, "add to cart") or act(tab, "search box", "running shoes").
-    Works on any page of the same type (product pages share "add to cart"). read_page lists what is known.
-    On a miss it says so: then use read_page + computer/form_input with ref and intent to teach it."""
-    return bt.act(tab_id, intent, value)
+    url: open that page first, still one call: act(tab, "add to cart", url=".../product/123") replaces
+    navigate + read_page + click. Works on every page of the same type. Returns the visible text afterwards, so
+    no read_page is needed to check the result. On a miss: read_page + computer/form_input with ref and intent."""
+    return bt.act(tab_id, intent, value, url)
 
 
 @browser_tool

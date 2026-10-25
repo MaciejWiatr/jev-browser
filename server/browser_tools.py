@@ -897,9 +897,11 @@ def recall(tab, intent):
     return ref
 
 
-def act(tab_id, intent, value=None):
-    """Do a learned action by name in one call."""
+def act(tab_id, intent, value=None, url=None):
+    """Do a learned action by name in one call; with url, open that page first (still one call)."""
     tab = get_tab(tab_id)
+    if url:
+        tab.navigate(url)
     entry = mem.lookup(tab.info()["url"], intent)
     if not entry:
         recall(tab, intent)  # raises the helpful miss message
@@ -913,7 +915,9 @@ def act(tab_id, intent, value=None):
     else:
         action = kind if kind in {"left_click", "double_click", "right_click", "hover", "triple_click"} else "left_click"
         result = computer(tab_id, action, intent=intent)[0]
-    return {"intent": intent, "from_memory": True, "learned_on": entry["page"], **result}
+    tab.page = None
+    visible = (tab.evaluate("document.body ? document.body.innerText : ''") or "")[:600]
+    return {"intent": intent, "from_memory": True, "learned_on": entry["page"], **result, "visible_text": visible}
 
 
 def run_workflow(tab_id, name, params=None):

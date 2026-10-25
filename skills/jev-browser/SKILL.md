@@ -29,7 +29,7 @@ The step-by-step tools also default to speed mode (instant cursor moves).
 ## Memory: get faster on every visit
 
 - **Teach while you work:** pass `intent` ("add to cart", "search box", "next page", "checkout") on every meaningful `computer` click/type and `form_input`. The target is remembered for that page type, so it works on every product page, not just this one.
-- **Reuse first:** `read_page` shows `memory.actions_here`. Use `act(tab, intent, value)` for those in one call instead of finding them again.
+- **Reuse first, skip reading:** `navigate` and `read_page` show `memory.actions_here`. When the action you need is listed, call `act` straight away: no `read_page`, no `find`. To do it on another page, `act(tab, intent, url=...)` opens the page and acts in one call. Check success from the returned `visible_text`; read the page only if it looks wrong.
 - **Workflows:** after a multi-step flow works, `save_workflow` it from intents with `{{param}}` placeholders for anything that changes or is personal (never literal personal data), then `run_workflow` next time. If it stops, finish the remaining steps by hand with `intent=` (that heals memory).
 - `site_memory` shows what is known plus this tab's recent actions; `forget_intent` / `forget_workflow` remove bad entries.
 
