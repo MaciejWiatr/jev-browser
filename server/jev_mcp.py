@@ -166,8 +166,9 @@ def handle_dialog(tab_id: str, accept: bool = True, prompt_text: str | None = No
 
 
 @browser_tool
-def resize_window(tab_id: str, width: int, height: int) -> dict:
-    """Set the tab's viewport size in CSS pixels, e.g. 390x844 to check a mobile layout."""
+def resize_window(tab_id: str, width: int = 0, height: int = 0) -> dict:
+    """Set the tab's viewport in CSS pixels, e.g. 390x844 to check a mobile layout.
+    Omit width/height to go back to filling the real Chrome window (the default)."""
     return bt.resize_window(tab_id, width, height)
 
 

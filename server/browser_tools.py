@@ -88,6 +88,7 @@ class Tab:
         TABS[self.id] = self
         for domain in ("Page", "Runtime", "Log", "Network"):
             self.call(f"{domain}.enable")
+        apply_viewport(self)
         self.call("Page.addScriptToEvaluateOnNewDocument", source=CURSOR_JS)
         self.call("Runtime.evaluate", expression=CURSOR_JS)
         self.mark_group(adopted)
@@ -722,11 +723,24 @@ def javascript_tool(tab_id, code):
     return {"result": (text or "")[:20000]}
 
 
-def resize_window(tab_id, width, height):
+def apply_viewport(tab, size=None):
+    """Fill the real Chrome window by default. Jev's Browser pins 1120x780 for jev_run; drop that here.
+    JEV_VIEWPORT=WIDTHxHEIGHT (or an explicit size) pins a fixed viewport instead."""
+    size = size or os.environ.get("JEV_VIEWPORT", "")
+    match = re.fullmatch(r"\s*(\d+)\s*[x×,]\s*(\d+)\s*", size or "")
+    if match:
+        width, height = map(int, match.groups())
+        tab.call("Emulation.setDeviceMetricsOverride", width=width, height=height, deviceScaleFactor=1, mobile=False)
+        return [width, height]
+    tab.call("Emulation.clearDeviceMetricsOverride")
+    return tab.evaluate("[innerWidth, innerHeight]")
+
+
+def resize_window(tab_id, width=0, height=0):
     tab = get_tab(tab_id)
-    tab.call("Emulation.setDeviceMetricsOverride", width=int(width), height=int(height), deviceScaleFactor=1, mobile=False)
+    viewport = apply_viewport(tab, f"{int(width)}x{int(height)}" if width and height else "window")
     tab.page = None
-    return {"viewport": [width, height]}
+    return {"viewport": viewport, "fits_window": not (width and height)}
 
 
 def file_upload(tab_id, paths, input_index=0):

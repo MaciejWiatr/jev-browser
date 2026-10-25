@@ -111,6 +111,7 @@ Set these in the `env` section of your Claude Code settings. The cursor mode can
 | `JEV_CURSOR_MODE` | `speed` | `speed`: instant moves, fastest. `natural`: human mode, ghost-cursor paths for sites that flag robotic input |
 | `JEV_CURSOR_MAX_MS` | `600` | Natural mode: longest time one cursor move may take |
 | `JEV_GROUP_TITLE` | `Jev · <folder>` | Tab group name |
+| `JEV_VIEWPORT` | fills the window | Pin a fixed page size, e.g. `1440x900` (`jev_run` always uses 1120x780 while it runs) |
 | `JEV_SITES_FILE` | `~/.config/jev/sites.json` | Site allow/deny rules |
 
 ## Troubleshooting
