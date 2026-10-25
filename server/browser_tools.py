@@ -682,7 +682,7 @@ def computer(tab_id, action, ref=None, coordinate=None, text=None, direction="do
     pump()
     url_before = tab.info()["url"]
     if intent and not ref and not coordinate and action not in {"screenshot", "zoom", "wait", "key"}:
-        ref = recall(tab, intent)
+        ref, _ = recall(tab, intent, text if action == "type" else None)
     if action == "screenshot":
         data = tab.screenshot()
         result = {"tab_id": tab.id, "url": tab.info()["url"]}
@@ -759,7 +759,7 @@ def form_input(tab_id, ref=None, value=None, intent=None):
     if not ref:
         if not intent:
             raise ToolError("form_input needs a ref from read_page, or an intent it has learned.")
-        ref = recall(tab, intent)
+        ref, _ = recall(tab, intent, value)
     ref, known, spot = resolve(tab, ref)
     node = int(ref[1:])
     if spot["tag"] == "SELECT":
@@ -846,21 +846,82 @@ def file_upload(tab_id, paths, input_index=0):
 
 # ---------- memory: learned actions and workflows ----------
 
-def learn(tab, url, intent, known, kind):
-    """Short-term: append to the tab's trail. Long-term: remember intent -> element for this page type."""
-    target = {"role": known["role"], "label": known["label"]} if known else None
-    tab.trail.append({"step": len(tab.trail), "do": kind, "target": target, "intent": intent, "url": url})
-    if intent and target:
-        return mem.remember(url, intent, {**target, "kind": kind})
-    return None
+SYNONYMS = {"cart": {"basket", "bag", "trolley"}, "basket": {"cart", "bag"}, "bag": {"cart", "basket"},
+            "buy": {"purchase", "order"}, "search": {"find", "query"}, "sign": {"log"}, "log": {"sign"},
+            "next": {"more", "forward"}, "checkout": {"pay", "proceed"}}
+CLICKABLE = {"button", "link", "menuitem", "tab", "option", "checkbox", "radio", "switch"}
+FILLABLE = {"textbox", "searchbox", "combobox", "spinbutton"}
 
 
 def _words(text):
     return set(re.findall(r"\w+", (text or "").lower()))
 
 
-def match_element(page, entry):
-    """Find the remembered element again: exact role+label, then case-insensitive, then shared words."""
+def _expand(words):
+    return set(words).union(*(SYNONYMS.get(w, set()) for w in words)) if words else set()
+
+
+ZONE_JS = """(nodes => nodes.map(n => {
+  const e = window.__jevFast?.nodes.get(n);
+  if (!e) return 'gone';
+  const side = /(^|[-_ ])(rec|recs|recommend\\w*|related|similar|upsell|cross-?sell|carousel|also|sponsored|ads?)([-_ ]|$)/i;
+  for (let a = e; a && a !== document.body; a = a.parentElement) {
+    if (a.matches('aside, nav, footer, header, [role=complementary], [role=navigation], [role=contentinfo], [role=banner]')) return 'side';
+    if (side.test(a.id || '') || side.test(typeof a.className === 'string' ? a.className : '')) return 'side';
+    const h = a.querySelector(':scope > h2, :scope > h3');
+    if (h && /recommend|related|similar|also (bought|like)|you may/i.test(h.textContent)) return 'side';
+  }
+  return 'main';
+}))"""
+
+TWIN_JS = """(label => [...document.querySelectorAll('button, a, input[type=submit], [role=button]')].some(e =>
+  (e.disabled || e.getAttribute('aria-disabled') === 'true') &&
+  (e.innerText || e.value || e.getAttribute('aria-label') || '').trim().toLowerCase() === label.toLowerCase() &&
+  !e.closest('aside, nav, footer, header, [role=complementary]')))"""
+
+
+def _zones(tab, found):
+    zones = tab.evaluate(f"{ZONE_JS}({json.dumps([e['node'] for e in found])})") or []
+    return {e["ref"]: z for e, z in zip(found, zones)}
+
+
+def _pick(tab, found, entry=None):
+    """Among look-alikes prefer the learned zone (else main content), then the learned position in it."""
+    if not found:
+        return None
+    zones = _zones(tab, found)
+    want = (entry or {}).get("zone") or "main"
+    pool = [e for e in found if zones.get(e["ref"]) == want]
+    if not pool:
+        return None  # the learned one isn't there (yet, e.g. still disabled): never fall back to a look-alike
+    return pool[min((entry or {}).get("nth", 0), len(pool) - 1)]["ref"]
+
+
+def _nth(page, known):
+    """Position among elements with the same role and label, to tell a main button from look-alike decoys."""
+    same = [e["ref"] for e in elements(page).values() if (e["role"], e["label"]) == (known["role"], known["label"])]
+    return same.index(known["ref"]) if known.get("ref") in same else 0
+
+
+def learn(tab, url, intent, known, kind):
+    """Short-term: append to the tab's trail. Long-term: remember intent -> element for this page type."""
+    target = {"role": known["role"], "label": known["label"]} if known else None
+    tab.trail.append({"step": len(tab.trail), "do": kind, "target": target, "intent": intent, "url": url})
+    if intent and target and mem.ENABLED:
+        zone, nth = "main", 0
+        if tab.page:
+            same = [e for e in elements(tab.page).values() if (e["role"], e["label"]) == (known["role"], known["label"])]
+            zones = _zones(tab, same) if len(same) > 1 else {}
+            zone = zones.get(known.get("ref"), "main")
+            in_zone = [e["ref"] for e in same if zones.get(e["ref"], "main") == zone]
+            nth = in_zone.index(known["ref"]) if known.get("ref") in in_zone else 0
+        return mem.remember(url, intent, {**target, "kind": kind, "nth": nth, "zone": zone})
+    return None
+
+
+def match_element(tab, page, entry):
+    """Find the remembered element again: exact role+label (nth among look-alikes), case-insensitive,
+    shared label words, intent words, then word overlap."""
     els = list(elements(page).values())
     role, label = entry.get("role"), entry.get("label", "")
     for test in (lambda e: e["role"] == role and e["label"] == label,
@@ -868,12 +929,12 @@ def match_element(page, entry):
                  lambda e: e["label"].lower() == label.lower()):
         found = [e for e in els if test(e)]
         if found:
-            return found[0]["ref"]
+            return _pick(tab, found, entry)
     for words in (set(entry.get("core") or []), _words(entry.get("intent"))):
         if len(words) >= 2:
-            found = [e for e in els if e["role"] == role and words <= _words(e["label"])]
-            if len(found) == 1 or (found and words == set(entry.get("core") or [])):
-                return found[0]["ref"]
+            found = [e for e in els if e["role"] == role and words <= _expand(_words(e["label"]))]
+            if found:
+                return _pick(tab, found, entry)
     want = _words(label)
     scored = sorted(((len(want & _words(e["label"])) / max(len(want | _words(e["label"])), 1), e)
                      for e in els if e["role"] == role), key=lambda s: -s[0])
@@ -882,42 +943,101 @@ def match_element(page, entry):
     return None
 
 
-def recall(tab, intent):
+def guess(tab, page, intent, value=None):
+    """Cold start: the element whose label contains every word of the intent (synonyms allowed).
+    Look-alikes with the same label resolve to the first in page order (main content before recommendations)."""
+    words = _words(intent) - {"the", "a", "an", "to", "on", "in", "of", "button", "link", "field", "box"}
+    if not words:
+        return None
+    roles = FILLABLE if value is not None else CLICKABLE
+    found = [e for e in elements(page).values() if e["role"] in roles and words <= _expand(_words(e["label"]))]
+    if not found:
+        return None
+    zones = _zones(tab, found)
+    main = [e for e in found if zones.get(e["ref"]) == "main"]
+    if not main and tab.evaluate(f"{TWIN_JS}({json.dumps(found[0]['label'])})"):
+        return None  # the real control is still disabled in main content: wait rather than click a decoy
+    pool = main or found
+    if len({e["label"] for e in pool}) > 1:
+        return {"ambiguous": sorted({e["label"] for e in pool})[:6]}
+    pick = pool[0]
+    return {"ref": pick["ref"], "role": pick["role"], "label": pick["label"], "nth": 0,
+            "zone": zones.get(pick["ref"], "main"), "lookalikes": len(found)}
+
+
+def _settle(tab, attempt, timeout=2.0):
+    """Retry briefly: late-loading or still-disabled controls appear within a moment."""
+    deadline = time.monotonic() + timeout
+    while True:
+        found = attempt(tab.observe())
+        if found or time.monotonic() > deadline:
+            return found
+        time.sleep(0.12)
+
+
+def recall(tab, intent, value=None):
+    """Ref for intent: from memory, or a confident guess that is then remembered."""
+    if not mem.ENABLED:
+        raise ToolError("Memory is off (JEV_MEMORY=off). Use read_page and refs.")
     url = tab.info()["url"]
     entry = mem.lookup(url, intent)
-    if not entry:
-        known = mem.known(url)
-        raise ToolError(f"No learned action {intent!r} for this page yet. Known here: {known['actions_here']}. "
-                        "Use read_page/find, then act with a ref and pass intent to teach it.")
-    ref = match_element(tab.observe(), entry)
-    if not ref:
-        raise ToolError(f"Learned target for {intent!r} ({entry['role']} {entry['label']!r}) is not on this page. "
-                        "Use read_page, then act with a ref and the same intent to re-teach it.")
-    mem.hit(url, intent, entry["page"])
-    return ref
+    if entry:
+        ref = _settle(tab, lambda page: match_element(tab, page, entry))
+        if ref:
+            mem.hit(url, entry["intent"], entry["page"])
+            return ref, "memory"
+    found = _settle(tab, lambda page: guess(tab, page, intent, value), timeout=3.0)
+    if found and found.get("ref"):
+        kind = "fill" if found["role"] in FILLABLE else "left_click"
+        mem.remember(url, intent, {"role": found["role"], "label": found["label"], "kind": kind, "nth": 0,
+                                   "zone": found["zone"]})
+        return found["ref"], "guessed"
+    known = mem.known(url)
+    detail = f" Candidates: {found['ambiguous']}." if found else ""
+    raise ToolError(f"Can't place {intent!r} on this page.{detail} Known here: {known['actions_here']}. "
+                    "read_page, then computer/form_input with a ref and intent to teach it.")
 
 
-def act(tab_id, intent, value=None, url=None):
-    """Do a learned action by name in one call; with url, open that page first (still one call)."""
-    tab = get_tab(tab_id)
-    if url:
-        tab.navigate(url)
-    entry = mem.lookup(tab.info()["url"], intent)
-    if not entry:
-        recall(tab, intent)  # raises the helpful miss message
-    kind = entry.get("kind", "left_click")
-    if kind in {"fill", "select", "check"}:
-        if value is None:
-            raise ToolError(f"{intent!r} is a {kind} action; pass value.")
-        result = form_input(tab_id, value=value, intent=intent)[0]
+def _act_here(tab, intent, value):
+    ref, how = recall(tab, intent, value)
+    known = elements(tab.page).get(ref, {})
+    entry = mem.lookup(tab.info()["url"], intent) or {}
+    kind = entry.get("kind") or ("fill" if known.get("role") in FILLABLE else "left_click")
+    if known.get("options") or kind == "select":
+        form_input(tab.id, ref=ref, value=value)
+    elif kind in {"fill", "check"} or (value is not None and known.get("role") in FILLABLE):
+        form_input(tab.id, ref=ref, value=value)
     elif kind == "type":
-        result = computer(tab_id, "type", text=str(value or ""), intent=intent)[0]
+        computer(tab.id, "type", ref=ref, text=str(value or ""))
     else:
-        action = kind if kind in {"left_click", "double_click", "right_click", "hover", "triple_click"} else "left_click"
-        result = computer(tab_id, action, intent=intent)[0]
-    tab.page = None
-    visible = (tab.evaluate("document.body ? document.body.innerText : ''") or "")[:600]
-    return {"intent": intent, "from_memory": True, "learned_on": entry["page"], **result, "visible_text": visible}
+        action = kind if kind in {"double_click", "right_click", "hover", "triple_click"} else "left_click"
+        computer(tab.id, action, ref=ref)
+    return {"did": known.get("label"), "role": known.get("role"), "how": how}
+
+
+def act(intent, tab_id=None, value=None, url=None, urls=None, then=None):
+    """Learned (or confidently guessed) actions in one call. urls repeats on each page; then chains more
+    steps on each page, e.g. then=[{"intent": "size", "value": "M"}, {"intent": "add to basket"}]."""
+    if tab_id is None:
+        tab_id = next(reversed(TABS), None) or tabs_create("about:blank")["tab_id"]
+    tab = get_tab(tab_id)
+    steps = [{"intent": intent, "value": value}] + list(then or [])
+    results = []
+    for page_url in (urls or [url] if (urls or url) else [None]):
+        row = {"url": page_url or tab.info()["url"]}
+        try:
+            if page_url:
+                tab.navigate(page_url)
+            row["steps"] = [_act_here(tab, s["intent"], s.get("value")) for s in steps]
+            if tab.dialog:
+                row["dialog_open"] = tab.dialog
+        except ToolError as exc:
+            row["error"] = str(exc)
+        tab.page = None
+        row["visible_text"] = (tab.evaluate("document.body ? document.body.innerText : ''") or "")[:240]
+        results.append(row)
+    ok = sum("error" not in r for r in results)
+    return {"tab_id": tab.id, "ok": ok, "of": len(results), "results": results}
 
 
 def run_workflow(tab_id, name, params=None):
@@ -940,9 +1060,11 @@ def run_workflow(tab_id, name, params=None):
                 tab.navigate(fill(step["navigate"]))
                 done.append({"step": i, "navigate": tab.info()["url"]})
                 continue
-            out = act(tab_id, step["intent"], fill(step.get("value")))
+            out = act(step["intent"], tab_id=tab_id, value=fill(step.get("value")))
+            if out["ok"] != 1:
+                raise ToolError(out["results"][0].get("error", "step failed"))
             tab.wait_loaded(timeout=8)
-            done.append({"step": i, "intent": step["intent"], "url": out.get("url")})
+            done.append({"step": i, "intent": step["intent"], "url": tab.info()["url"]})
         except ToolError as exc:
             return {"workflow": name, "completed": i, "of": len(flow["steps"]), "stopped": str(exc),
                     "remaining": flow["steps"][i:], "done": done,

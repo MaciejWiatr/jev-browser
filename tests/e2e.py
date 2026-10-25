@@ -123,8 +123,8 @@ async def main():
         page = await call("read_page", tab_id=tab, include_text=False)
         check("read_page shows learned actions", "add to cart" in page.get("memory", {}).get("actions_here", []), page)
         reused = await call("act", tab_id=tab, intent="add to cart")
-        check("act reuses it on another product (different label)", reused.get("from_memory") and
-              (await cart())["result"] == "2", reused)
+        check("act reuses it on another product (different label)", reused.get("ok") == 1 and
+              reused["results"][0]["steps"][0]["how"] == "memory" and (await cart())["result"] == "2", reused)
 
         flow = await call("save_workflow", tab_id=tab, name="add product", description="Open a product and add it",
                           steps=[{"navigate": shop + "{{id}}"}, {"intent": "add to cart"}])
@@ -133,7 +133,9 @@ async def main():
         check("workflow replays in one call", ran.get("completed") == 2 and (await cart())["result"] == "3", ran)
 
         miss = await call("act", tab_id=tab, intent="checkout")
-        check("unknown intent is a clear miss", "No learned action" in miss.get("error", ""), miss)
+        check("unknown intent is a clear miss", "Can't place" in miss["results"][0].get("error", ""), miss)
+        batch = await call("act", intent="add to cart", urls=[shop + "A1B2C3", shop + "Z9Y8X7"])
+        check("batch act: one call, two pages", batch.get("ok") == 2 and (await cart())["result"] == "5", batch)
         memory = await call("site_memory", tab_id=tab)
         check("site_memory shows trail and workflows", memory["recent_actions_this_session"] and
               "add product" in memory["workflows"], memory)

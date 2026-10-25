@@ -18,6 +18,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 MEM_DIR = Path(os.environ.get("JEV_MEMORY_DIR", "~/.jev/memory")).expanduser()
+ENABLED = os.environ.get("JEV_MEMORY", "on").lower() not in {"off", "0", "false", "no"}
 _SITES = {}  # host -> {"actions": {template: {intent: entry}}, "workflows": {name: workflow}}
 _LOCK = threading.RLock()
 _ID = re.compile(r"^(?=.*\d)[\w-]{6,}$|^\d+$|^[0-9a-f-]{16,}$", re.I)
@@ -73,7 +74,8 @@ def remember(url, intent, target):
             entry["core"] = sorted(set(entry.get("core") or re.findall(r"\w+", entry["label"].lower())) & words)
         entry = dict(entry)
         entry.update(role=target.get("role"), label=target["label"], kind=target.get("kind", "click"),
-                     intent=intent, last_used=time.time())
+                     nth=target.get("nth", 0), zone=target.get("zone", "main"), intent=intent,
+                     last_used=time.time())
         actions[key] = entry
         _save(host)
         return {"site": host, "page": template, "intent": key}
@@ -97,7 +99,23 @@ def lookup(url, intent):
         if others:
             t, entry = max(others, key=lambda o: o[1].get("last_used", 0))
             return {**entry, "page": t, "same_page": False}
+        # Same meaning, different wording ("add to cart" vs "add to basket"): closest learned intent.
+        want = _expand(set(key.split()))
+        best = None
+        for t, acts in actions.items():
+            for k, entry in acts.items():
+                have = _expand(set(k.split()))
+                score = len(want & have) / max(len(want | have), 1)
+                if score >= 0.5 and (best is None or (t == template, score) > (best[0] == template, best[2])):
+                    best = (t, entry, score)
+        if best:
+            return {**best[1], "page": best[0], "same_page": best[0] == template, "matched_intent": best[1]["intent"]}
     return None
+
+
+def _expand(words):
+    from browser_tools import SYNONYMS  # shared vocabulary, imported lazily to avoid a cycle
+    return set(words).union(*(SYNONYMS.get(w, set()) for w in words)) if words else set()
 
 
 def hit(url, intent, page):

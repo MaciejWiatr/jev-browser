@@ -1,0 +1,11 @@
+<!doctype html><html><head><title>Search results</title><script src="data.js"></script></head><body>
+<header><a href="index.html">Jev Bench Shop</a> · <a id="badge" href="basket.html">Basket (0)</a></header>
+<h1>Results</h1><ol id="list"></ol>
+<script>
+  const q = (new URLSearchParams(location.search).get('q') || '').toLowerCase();
+  const hits = Object.entries(PRODUCTS).filter(([, n]) => n.toLowerCase().includes(q));
+  document.getElementById('list').innerHTML = hits.length
+    ? hits.map(([id, n]) => `<li><a href="p.html?id=${id}">${n}</a> · ${19 + id.slice(-1) * 3} zł</li>`).join('')
+    : '<li>No products found</li>';
+</script>
+</body></html>

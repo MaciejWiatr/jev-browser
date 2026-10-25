@@ -1,0 +1,5 @@
+<!doctype html><html><head><title>Basket</title><script src="data.js"></script></head><body>
+<header><a href="index.html">Jev Bench Shop</a> · <a id="badge" href="basket.html">Basket (0)</a></header>
+<h1>Basket</h1><ul id="items"></ul>
+<script>document.getElementById('items').innerHTML = basket().map(i => `<li>${PRODUCTS[i.id]} · size ${i.size}</li>`).join('') || '<li>Empty</li>';</script>
+</body></html>

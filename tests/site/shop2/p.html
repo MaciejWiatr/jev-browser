@@ -1,0 +1,25 @@
+<!doctype html><html><head><title>Product</title><script src="data.js"></script></head><body>
+<header><a href="index.html">Jev Bench Shop</a> · <a id="badge" href="basket.html">Basket (0)</a></header>
+<main>
+  <h1 id="name">Product</h1>
+  <label>Size <select id="size"><option value="">Choose size</option><option>S</option><option>M</option><option>L</option></select></label>
+  <button id="add" disabled>Add to basket</button>
+  <p id="msg"></p>
+</main>
+<aside><h2>Recommended</h2><div id="recs"></div></aside>
+<script>
+  const id = new URLSearchParams(location.search).get('id');
+  document.getElementById('name').textContent = PRODUCTS[id] || 'Unknown product';
+  document.title = PRODUCTS[id] || 'Product';
+  const add = document.getElementById('add'), size = document.getElementById('size');
+  let ready = false;
+  const sync = () => { add.disabled = !(ready && size.value); };
+  setTimeout(() => { ready = true; sync(); }, 400);           // late-enabling control
+  size.addEventListener('change', sync);
+  add.onclick = () => { addToBasket(id, size.value); document.getElementById('msg').textContent = `Added ${PRODUCTS[id]} (${size.value})`; };
+  // Decoys: same label, different product, no size.
+  const others = Object.keys(PRODUCTS).filter(k => k !== id).slice(0, 2);
+  document.getElementById('recs').innerHTML = others.map(k => `<div>${PRODUCTS[k]} <button data-id="${k}">Add to basket</button></div>`).join('');
+  document.querySelectorAll('#recs button').forEach(b => b.onclick = () => addToBasket(b.dataset.id, 'decoy'));
+</script>
+</body></html>

@@ -32,16 +32,20 @@ mcp = FastMCP(
         "work only in tabs this session created. read_page gives element refs (n12) for computer/form_input. "
         "If read_page returns needs_user (login or CAPTCHA), stop and ask the user to handle it in Chrome. "
         "Never trigger alert/confirm dialogs on purpose; if one opens, use handle_dialog. "
-        "For one narrow goal on one site, jev_run is much faster than step-by-step tools. "
-        "MEMORY (saves whole tool calls): pass intent='add to cart' (a short name) on every meaningful computer "
-        "click/type and form_input; it is learned for that page type. When navigate/read_page list "
-        "memory.actions_here, or the same action repeats on similar pages, call act(tab, intent, url=...) to open "
-        "the page and act in ONE call, without read_page, and check the returned visible_text."
+        "For one narrow goal on one site, jev_run is much faster than step-by-step tools."
+        + (" FASTEST PATH: every tool call costs a full model turn, so do as much per call as possible. "
+           "Try act(intent, ...) BEFORE read_page: it finds the control from memory or its label, learns it, and "
+           "takes url/urls/then, so 'add these 5 products in size M' is ONE call: act('size', value='M', "
+           "urls=[...], then=[{'intent': 'add to basket'}]). Check its returned visible_text instead of "
+           "re-reading. Use read_page only when act reports a miss; then pass intent= on computer/form_input so "
+           "it is learned." if bt.mem.ENABLED else "")
     ),
 )
 
 
 def _memory_hint(url):
+    if not bt.mem.ENABLED:
+        return {}
     known = bt.mem.known(url)
     if not (known["actions_here"] or known["workflows"] or known["actions_elsewhere_on_site"]):
         return {}
@@ -69,6 +73,10 @@ def browser_tool(fn):
         return await anyio.to_thread.run_sync(call)
 
     return mcp.tool()(wrapper)
+
+
+def memory_tool(fn):
+    return browser_tool(fn) if bt.mem.ENABLED else fn
 
 
 def _with_image(result):
@@ -206,16 +214,20 @@ def set_cursor_mode(mode: Literal["speed", "natural"] | None = None) -> dict:
 
 # ---------- memory ----------
 
-@browser_tool
-def act(tab_id: str, intent: str, value: str | bool | None = None, url: str | None = None) -> dict:
-    """Do a learned action in one call, e.g. act(tab, "add to cart") or act(tab, "search box", "running shoes").
-    url: open that page first, still one call: act(tab, "add to cart", url=".../product/123") replaces
-    navigate + read_page + click. Works on every page of the same type. Returns the visible text afterwards, so
-    no read_page is needed to check the result. On a miss: read_page + computer/form_input with ref and intent."""
-    return bt.act(tab_id, intent, value, url)
+@memory_tool
+def act(intent: str, tab_id: str | None = None, value: str | bool | None = None, url: str | None = None,
+        urls: list[str] | None = None, then: list[dict] | None = None) -> dict:
+    """The fastest way to do anything: one call, no read_page needed.
+    intent: what to do, in a few words ("add to cart", "search box", "size"). Uses memory for this page type,
+    or a confident match on the label (the button whose label contains the intent words), which is then learned.
+    value: text to type or option to pick. url: open this page first. urls: repeat on each page in ONE call.
+    then: more steps per page, e.g. act("size", value="M", urls=[...], then=[{"intent": "add to basket"}]).
+    tab_id is optional (reuses this session's tab). Returns what was clicked and visible text per page; on a
+    miss it lists candidates, then teach it with read_page + computer/form_input(ref, intent)."""
+    return bt.act(intent, tab_id, value, url, urls, then)
 
 
-@browser_tool
+@memory_tool
 def save_workflow(tab_id: str, name: str, description: str, steps: list[dict]) -> dict:
     """Save a reusable workflow for the current site from learned intents. Each step is {"intent": ..., "value": ...}
     or {"navigate": url}. Use {{param}} placeholders for anything that changes or is personal, e.g.
@@ -224,14 +236,14 @@ def save_workflow(tab_id: str, name: str, description: str, steps: list[dict]) -
     return bt.mem.save_workflow(bt.get_tab(tab_id).info()["url"], name, description, steps)
 
 
-@browser_tool
+@memory_tool
 def run_workflow(tab_id: str, name: str, params: dict | None = None) -> dict:
     """Replay a saved workflow for the current site in one call. Stops at the first step that no longer matches and
     returns the remaining steps, so you can finish them by hand (with intent=, which heals memory)."""
     return bt.run_workflow(tab_id, name, params)
 
 
-@browser_tool
+@memory_tool
 def site_memory(tab_id: str | None = None, url: str | None = None, forget_intent: str | None = None,
                 forget_workflow: str | None = None) -> dict:
     """What jev remembers for a site: learned actions on this page type and elsewhere on the site, saved workflows,
