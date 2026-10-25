@@ -1,7 +1,7 @@
 {
   "name": "jev",
   "description": "Jev Ultrafast browser agent as native tools: Claude-in-Chrome style tools + jev_run agent, background tabs, human cursor",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "author": {
     "name": "Maciej Wiatr",
     "url": "https://github.com/MaciejWiatr"
