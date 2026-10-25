@@ -8,21 +8,27 @@ A Claude Code plugin that gives Claude the full [Claude in Chrome](https://code.
 
 - **Background tabs.** Agent tabs never come to the front, so your keyboard and focus stay yours.
 - **Fast.** `jev_run` turns one goal into a finished page in 2 to 8 seconds. With the step-by-step tools in speed mode (the default), each action takes about 0.1 s.
-- **Separate cursor.** Input goes straight into the tab through CDP. Your macOS cursor never moves. The page shows its own orange agent cursor.
+- **Separate cursor.** Input goes straight into the tab through CDP. Your own mouse cursor never moves. The page shows its own orange agent cursor.
 - **Human mode, when a site needs it.** For sites that react to robotic mouse movement, say "switch to human mode": curved paths with overshoot and varied timing from [ghost-cursor](https://github.com/Xetera/ghost-cursor), about 0.7 s per move. Claude still stops at CAPTCHAs and hands them to you. `JEV_CURSOR_MODE=natural` makes it the default.
 - **Tab groups.** Each Claude session's tabs go into an orange group named `Jev · <project folder>`.
-- **Learns sites.** Each action Claude names ("add to cart") is remembered per page type, so it applies to every product page, not just one. Next time it's a single `act` call, and multi-step flows replay with `run_workflow`. Memory lives in `~/.jev/memory` and never stores what you typed.
+- **Learns sites.** Each action Claude names ("add to cart") is remembered per page type, so it applies to every product page, not just one. Next time it's a single `act` call, and multi-step flows replay with `run_workflow`. Memory lives in `~/.jev/memory`, encrypted (AES-256-GCM, key in your OS keychain: macOS Keychain, Windows Credential Manager or Linux Secret Service; file names hashed so they don't reveal sites), and never stores what you typed.
 - **Your logins.** Claude works in the Chrome profile you're already signed into. It stops and hands over at login pages and CAPTCHAs.
 - **Loaded automatically.** Installed at user level, so every Claude Code session has the tools without extra flags.
 
 ## Install
 
-You need macOS or Linux, Chrome, [Claude Code](https://code.claude.com), [uv](https://docs.astral.sh/uv/) and Node 18 or later.
+Works on macOS, Linux and Windows. You need Chrome (or Edge/another Chromium browser), [Claude Code](https://code.claude.com), [uv](https://docs.astral.sh/uv/) and Node 18 or later.
 
 **1. Run the installer** (about 1 minute):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/MaciejWiatr/jev-browser/main/install.sh | bash
+```
+
+On Windows, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/MaciejWiatr/jev-browser/main/install.ps1 | iex
 ```
 
 It clones Jev Ultrafast into `~/.jev/jev-ultrafast`, installs its dependencies and adds the plugin to Claude Code.
@@ -114,7 +120,8 @@ Set these in the `env` section of your Claude Code settings. The cursor mode can
 | `JEV_CURSOR_MAX_MS` | `600` | Natural mode: longest time one cursor move may take |
 | `JEV_GROUP_TITLE` | `Jev · <folder>` | Tab group name |
 | `JEV_VIEWPORT` | fills the window | Pin a fixed page size, e.g. `1440x900` (`jev_run` always uses 1120x780 while it runs) |
-| `JEV_MEMORY_DIR` | `~/.jev/memory` | Learned actions and workflows, one JSON file per site |
+| `JEV_MEMORY_DIR` | `~/.jev/memory` | Learned actions and workflows, one encrypted file per site |
+| `JEV_MEMORY` | `on` | `off` disables memory and its tools |
 | `JEV_SITES_FILE` | `~/.config/jev/sites.json` | Site allow/deny rules |
 
 ## Troubleshooting

@@ -7,8 +7,16 @@ so memory survives restarts and is shared with other Claude sessions on their ne
 
 Only roles, labels and intents are stored. Text typed into fields is never stored unless a workflow step
 spells it out; workflows should use {{param}} placeholders for anything personal.
+
+At rest every site file is AES-256-GCM encrypted (tampering is detected) and named by a keyed hash of the
+domain, so neither contents nor file names reveal which sites were visited. The key lives in the OS keychain
+via keyring: macOS Keychain, Windows Credential Manager, or Linux Secret Service. Without a keychain (e.g.
+headless Linux) it falls back to ~/.jev/memory.key, readable only by the user.
+JEV_MEMORY_KEY (64 hex chars) overrides both, e.g. for tests.
 """
 
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -21,6 +29,9 @@ MEM_DIR = Path(os.environ.get("JEV_MEMORY_DIR", "~/.jev/memory")).expanduser()
 ENABLED = os.environ.get("JEV_MEMORY", "on").lower() not in {"off", "0", "false", "no"}
 _SITES = {}  # host -> {"actions": {template: {intent: entry}}, "workflows": {name: workflow}}
 _LOCK = threading.RLock()
+SYNONYMS = {"cart": {"basket", "bag", "trolley"}, "basket": {"cart", "bag"}, "bag": {"cart", "basket"},
+           "buy": {"purchase", "order"}, "search": {"find", "query"}, "sign": {"log"}, "log": {"sign"},
+           "next": {"more", "forward"}, "checkout": {"pay", "proceed"}}
 _ID = re.compile(r"^(?=.*\d)[\w-]{6,}$|^\d+$|^[0-9a-f-]{16,}$", re.I)
 
 
@@ -36,17 +47,87 @@ def norm(intent):
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", (intent or "").lower())).strip()
 
 
+MAGIC = b"JEV1"
+_KEY = []
+
+
+def _key():
+    """32-byte key: JEV_MEMORY_KEY, else the OS keychain, else a private key file. Created on first use."""
+    if _KEY:
+        return _KEY[0]
+    hex_key = os.environ.get("JEV_MEMORY_KEY")
+    if not hex_key:
+        try:
+            import keyring
+
+            hex_key = keyring.get_password("jev-browser", "memory-key")
+            if not hex_key:
+                hex_key = os.urandom(32).hex()
+                keyring.set_password("jev-browser", "memory-key", hex_key)
+                hex_key = keyring.get_password("jev-browser", "memory-key")  # confirm it really stored
+        except Exception:
+            hex_key = None
+    if not hex_key:
+        key_file = MEM_DIR.parent / "memory.key"
+        if key_file.exists():
+            hex_key = key_file.read_text().strip()
+        else:
+            key_file.parent.mkdir(parents=True, exist_ok=True)
+            hex_key = os.urandom(32).hex()
+            fd = os.open(key_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w") as f:
+                f.write(hex_key)
+    _KEY.append(bytes.fromhex(hex_key))
+    return _KEY[0]
+
+
 def _file(host):
+    digest = hmac.new(_key(), b"site:" + host.encode(), hashlib.sha256).hexdigest()[:32]
+    return MEM_DIR / f"{digest}.jev"
+
+
+def _legacy_file(host):
     return MEM_DIR / f"{re.sub(r'[^a-z0-9.-]', '_', host)}.json"
+
+
+def _seal(host, data):
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    nonce = os.urandom(12)
+    return MAGIC + nonce + AESGCM(_key()).encrypt(nonce, data, b"jev-memory:" + host.encode())
+
+
+def _open(host, blob):
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    if not blob.startswith(MAGIC):
+        raise ValueError("not a jev memory file")
+    nonce, sealed = blob[4:16], blob[16:]
+    return AESGCM(_key()).decrypt(nonce, sealed, b"jev-memory:" + host.encode())
 
 
 def _site(host):
     with _LOCK:
         if host not in _SITES:
+            data = {}
             try:
-                _SITES[host] = json.loads(_file(host).read_text())
-            except (OSError, ValueError):
-                _SITES[host] = {}
+                data = json.loads(_open(host, _file(host).read_bytes()))
+            except FileNotFoundError:
+                legacy = _legacy_file(host)
+                if legacy.exists():  # plaintext memory from before encryption: migrate it
+                    try:
+                        data = json.loads(legacy.read_text())
+                    except ValueError:
+                        data = {}
+                    _SITES[host] = data
+                    _save(host)
+                    legacy.unlink()
+            except Exception:
+                # Wrong key (keychain unavailable?) or tampered file: never trust it, never overwrite it.
+                bad = _file(host)
+                bad.replace(bad.with_suffix(f".unreadable-{int(time.time())}"))
+                data = {}
+            _SITES[host] = data
             _SITES[host].setdefault("actions", {})
             _SITES[host].setdefault("workflows", {})
         return _SITES[host]
@@ -54,9 +135,13 @@ def _site(host):
 
 def _save(host):
     MEM_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = _file(host).with_suffix(".tmp")
-    tmp.write_text(json.dumps(_SITES[host], indent=1, ensure_ascii=False))
-    tmp.replace(_file(host))
+    target = _file(host)
+    tmp = target.with_suffix(".tmp")
+    tmp.write_bytes(_seal(host, json.dumps(_SITES[host], ensure_ascii=False).encode()))
+    if os.name == "posix":  # Windows: the user profile's ACLs already keep this private
+        os.chmod(MEM_DIR, 0o700)
+        os.chmod(tmp, 0o600)
+    tmp.replace(target)
 
 
 def remember(url, intent, target):
@@ -114,7 +199,6 @@ def lookup(url, intent):
 
 
 def _expand(words):
-    from browser_tools import SYNONYMS  # shared vocabulary, imported lazily to avoid a cycle
     return set(words).union(*(SYNONYMS.get(w, set()) for w in words)) if words else set()
 
 

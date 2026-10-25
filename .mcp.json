@@ -1,5 +1,6 @@
 {
   "jev": {
-    "command": "${CLAUDE_PLUGIN_ROOT}/server/run.sh"
+    "command": "uv",
+    "args": ["run", "--quiet", "--no-project", "--python", ">=3.12", "${CLAUDE_PLUGIN_ROOT}/server/launch.py"]
   }
 }

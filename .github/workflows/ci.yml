@@ -1,0 +1,26 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  platform:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Memory, encryption and launcher
+        run: uv run --no-project --python 3.12 --with "cryptography>=43,<51" --with "keyring>=25,<26" --with "filelock>=3.12,<4" python tests/test_memory.py
+      - name: Server modules compile
+        run: uv run --no-project --python 3.12 python -m py_compile server/jev_mcp.py server/browser_tools.py server/memory.py server/launch.py
+      - name: install.ps1 parses
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$PWD/install.ps1", [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) { $errors; exit 1 }
+      - name: install.sh parses
+        if: runner.os != 'Windows'
+        run: bash -n install.sh

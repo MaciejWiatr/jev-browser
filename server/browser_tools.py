@@ -5,7 +5,6 @@ from read_page, which come from Jev's atomic DOM snapshot; refs never become sel
 """
 
 import base64
-import fcntl
 import fnmatch
 import io
 import json
@@ -21,6 +20,7 @@ from pathlib import Path
 from urllib.parse import quote, urlparse
 
 from browser_harness.admin import ensure_daemon
+from filelock import FileLock, Timeout
 from browser_harness.helpers import cdp, drain_events
 
 from jev_ultrafast.browser import Browser, StalePage
@@ -283,30 +283,32 @@ def _spool(session):
 
 def register_session(session):
     EVENTS_DIR.mkdir(parents=True, exist_ok=True)
-    _spool(session).touch()
+    if os.name == "posix":
+        os.chmod(EVENTS_DIR, 0o700)  # console/network events may contain private data
+    _spool(session).touch(mode=0o600)
 
 
 def unregister_session(session):
-    _spool(session).unlink(missing_ok=True)
+    for path in (_spool(session), Path(str(_spool(session)) + ".lock")):
+        path.unlink(missing_ok=True)
 
 
 def _relay(event):
     path = _spool(event.get("session_id"))
     if event.get("method") not in RELAYED or not path.exists():
         return
-    with open(path, "a") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
+    with FileLock(str(path) + ".lock", timeout=2), open(path, "a") as f:
         f.write(json.dumps(event) + "\n")
 
 
 def _collect(session):
+    path = _spool(session)
     try:
-        with open(_spool(session), "r+") as f:
-            fcntl.flock(f, fcntl.LOCK_EX)
+        with FileLock(str(path) + ".lock", timeout=2), open(path, "r+") as f:
             lines = f.read().splitlines()
             f.seek(0)
             f.truncate()
-    except FileNotFoundError:
+    except (FileNotFoundError, Timeout):
         return []
     return [json.loads(line) for line in lines if line.strip()]
 
@@ -846,9 +848,7 @@ def file_upload(tab_id, paths, input_index=0):
 
 # ---------- memory: learned actions and workflows ----------
 
-SYNONYMS = {"cart": {"basket", "bag", "trolley"}, "basket": {"cart", "bag"}, "bag": {"cart", "basket"},
-            "buy": {"purchase", "order"}, "search": {"find", "query"}, "sign": {"log"}, "log": {"sign"},
-            "next": {"more", "forward"}, "checkout": {"pay", "proceed"}}
+SYNONYMS = mem.SYNONYMS
 CLICKABLE = {"button", "link", "menuitem", "tab", "option", "checkbox", "radio", "switch"}
 FILLABLE = {"textbox", "searchbox", "combobox", "spinbutton"}
 

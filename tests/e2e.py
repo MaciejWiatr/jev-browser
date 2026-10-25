@@ -43,7 +43,8 @@ async def main():
     base = serve()
     out = Path(tempfile.mkdtemp(prefix="jev-e2e-"))
     env = {**os.environ, "JEV_MEMORY_DIR": str(out / "memory")}  # events dir stays shared: other sessions relay into it
-    params = StdioServerParameters(command=str(ROOT / "server" / "run.sh"), cwd=str(out), env=env)
+    params = StdioServerParameters(command="uv", args=["run", "--quiet", "--no-project", "--python", ">=3.12",
+                                   str(ROOT / "server" / "launch.py")], cwd=str(out), env=env)
     async with stdio_client(params) as (r, w), ClientSession(r, w) as s:
         await s.initialize()
 
@@ -139,7 +140,9 @@ async def main():
         memory = await call("site_memory", tab_id=tab)
         check("site_memory shows trail and workflows", memory["recent_actions_this_session"] and
               "add product" in memory["workflows"], memory)
-        check("memory persisted to disk", any((out / "memory").glob("*.json")))
+        saved = list((out / "memory").glob("*.jev"))
+        check("memory persisted to disk, encrypted", saved and not any(
+            w in f.read_bytes() for f in saved for w in (b"127.0.0.1", b"add to cart", b"Add to cart")), saved)
 
         await call("tabs_close", tab_id=tab)
         check("tab closed", not (await call("tabs_context"))["tabs"])
