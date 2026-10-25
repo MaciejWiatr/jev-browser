@@ -29,6 +29,8 @@ mcp = FastMCP(
     "jev",
     instructions=(
         "Browser control in the user's real Chrome (their logins). Start with tabs_context, then tabs_create; "
+        "pass task='<3-5 word summary of the request>' on the first tabs_create/act so the tab group is named after "
+        "it, and pass a new task to tabs_context when the user's task changes. "
         "work only in tabs this session created. read_page gives element refs (n12) for computer/form_input. "
         "If read_page returns needs_user (login or CAPTCHA), stop and ask the user to handle it in Chrome. "
         "Never trigger alert/confirm dialogs on purpose; if one opens, use handle_dialog. "
@@ -87,17 +89,19 @@ def _with_image(result):
 # ---------- tabs ----------
 
 @browser_tool
-def tabs_context(create_if_empty: bool = False) -> dict:
-    """List the tabs this session owns (its tab group). create_if_empty=true opens a blank tab if there are none."""
-    return bt.tabs_context(create_if_empty)
+def tabs_context(create_if_empty: bool = False, task: str | None = None) -> dict:
+    """List the tabs this session owns (its tab group). create_if_empty=true opens a blank tab if there are none.
+    task: rename the tab group when the user's task changes (3-5 words)."""
+    return {**bt.tabs_context(create_if_empty, task), "group": bt.GROUP_TITLE}
 
 
 @browser_tool
-def tabs_create(url: str = "about:blank", activate: bool = False) -> dict:
+def tabs_create(url: str = "about:blank", activate: bool = False, task: str | None = None) -> dict:
     """Open a new tab in the user's Chrome, optionally at url. Returns its tab_id.
     The tab opens in the background so the agent's input never mixes with the user's keyboard and cursor.
-    activate=true brings it to the front (steals focus); use only when the user asks to watch."""
-    info = bt.tabs_create(url, activate)
+    activate=true brings it to the front (steals focus); use only when the user asks to watch.
+    task: 3-5 word summary of the user's request, e.g. "Add 5 items to cart"; names the tab group."""
+    info = bt.tabs_create(url, activate, task)
     return {**info, **_memory_hint(info.get("url"))}
 
 
@@ -216,15 +220,16 @@ def set_cursor_mode(mode: Literal["speed", "natural"] | None = None) -> dict:
 
 @memory_tool
 def act(intent: str, tab_id: str | None = None, value: str | bool | None = None, url: str | None = None,
-        urls: list[str] | None = None, then: list[dict] | None = None) -> dict:
+        urls: list[str] | None = None, then: list[dict] | None = None, task: str | None = None) -> dict:
     """The fastest way to do anything: one call, no read_page needed.
     intent: what to do, in a few words ("add to cart", "search box", "size"). Uses memory for this page type,
     or a confident match on the label (the button whose label contains the intent words), which is then learned.
     value: text to type or option to pick. url: open this page first. urls: repeat on each page in ONE call.
     then: more steps per page, e.g. act("size", value="M", urls=[...], then=[{"intent": "add to basket"}]).
     tab_id is optional (reuses this session's tab). Returns what was clicked and visible text per page; on a
-    miss it lists candidates, then teach it with read_page + computer/form_input(ref, intent)."""
-    return bt.act(intent, tab_id, value, url, urls, then)
+    miss it lists candidates, then teach it with read_page + computer/form_input(ref, intent).
+    task: 3-5 word summary of the user's request; names the tab group when act opens the first tab."""
+    return bt.act(intent, tab_id, value, url, urls, then, task)
 
 
 @memory_tool

@@ -20,7 +20,7 @@ The step-by-step tools also default to speed mode (instant cursor moves).
 
 ## Step-by-step loop
 
-1. `tabs_context` → reuse a session tab, or `tabs_create(url)`. Only tabs from this session are available. `activate: true` only when the user asks to watch.
+1. `tabs_context` → reuse a session tab, or `tabs_create(url, task="<3-5 word summary of the request>")`. The task names the Chrome tab group ("Jev · Add 5 items to cart"); pass a new `task` to `tabs_context` when the request changes. Only tabs from this session are available. `activate: true` only when the user asks to watch.
 2. `read_page` → element refs like `[n12] button 'Search'`, visible text, `file_inputs`, `needs_user`.
 3. Act: `computer` (left_click / type / key / scroll / hover / wait), `form_input` (text, select, checkbox), `navigate` (url, back, forward, reload), `file_upload`, `javascript_tool`.
 4. Verify after each meaningful step with `read_page`, `computer screenshot`, or `get_page_text`. Refs go stale after the page changes; read again.

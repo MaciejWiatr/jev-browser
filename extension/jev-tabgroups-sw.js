@@ -12,6 +12,7 @@ async function group (tabId, session, title) {
       const existing = await chrome.tabGroups.get(stored)
       if (existing.windowId === tab.windowId) {
         if (tab.groupId !== stored) await chrome.tabs.group({ tabIds: [tabId], groupId: stored })
+        if (existing.title !== title) await chrome.tabGroups.update(stored, { title })  // task changed: rename
         return
       }
     } catch (_) { /* group was closed */ }

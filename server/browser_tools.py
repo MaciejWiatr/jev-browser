@@ -222,7 +222,23 @@ def get_tab(tab_id):
     return TABS[tab_id]
 
 
-def tabs_context(create_if_empty=False):
+def set_task(task):
+    """Name this session's tab group after the task, e.g. 'Jev · Add 5 items to cart'. Renames it if it exists."""
+    global GROUP_TITLE
+    task = re.sub(r"[|\s]+", " ", task or "").strip()
+    if not task:
+        return GROUP_TITLE
+    title = f"Jev · {task[:40]}"
+    if title != GROUP_TITLE:
+        GROUP_TITLE = title
+        tab = next(iter(TABS.values()), None)
+        if tab:
+            tab.mark_group(adopted=True)  # one marked tab is enough: the extension renames the whole group
+    return GROUP_TITLE
+
+
+def tabs_context(create_if_empty=False, task=None):
+    set_task(task)
     if create_if_empty and not TABS:
         tabs_create("about:blank")
     for tab_id in [t for t, tab in TABS.items() if tab.info().get("closed")]:
@@ -231,7 +247,8 @@ def tabs_context(create_if_empty=False):
             "note": "Only tabs opened in this session are listed. Use tabs_create for a new one."}
 
 
-def tabs_create(url="about:blank", activate=False):
+def tabs_create(url="about:blank", activate=False, task=None):
+    set_task(task)
     with _quiet():
         ensure_daemon()
     try:
@@ -1015,9 +1032,10 @@ def _act_here(tab, intent, value):
     return {"did": known.get("label"), "role": known.get("role"), "how": how}
 
 
-def act(intent, tab_id=None, value=None, url=None, urls=None, then=None):
+def act(intent, tab_id=None, value=None, url=None, urls=None, then=None, task=None):
     """Learned (or confidently guessed) actions in one call. urls repeats on each page; then chains more
     steps on each page, e.g. then=[{"intent": "size", "value": "M"}, {"intent": "add to basket"}]."""
+    set_task(task)
     if tab_id is None:
         tab_id = next(reversed(TABS), None) or tabs_create("about:blank")["tab_id"]
     tab = get_tab(tab_id)
