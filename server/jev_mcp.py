@@ -32,7 +32,11 @@ mcp = FastMCP(
         "work only in tabs this session created. read_page gives element refs (n12) for computer/form_input. "
         "If read_page returns needs_user (login or CAPTCHA), stop and ask the user to handle it in Chrome. "
         "Never trigger alert/confirm dialogs on purpose; if one opens, use handle_dialog. "
-        "For one narrow goal on one site, jev_run is much faster than step-by-step tools."
+        "For one narrow goal on one site, jev_run is much faster than step-by-step tools. "
+        "MEMORY (saves whole tool calls): pass intent='add to cart' (a short name) on every meaningful computer "
+        "click/type and form_input; it is learned for that page type. When navigate/read_page list "
+        "memory.actions_here, or the same action repeats on similar pages, call act(tab, intent, url=...) to open "
+        "the page and act in ONE call, without read_page, and check the returned visible_text."
     ),
 )
 
