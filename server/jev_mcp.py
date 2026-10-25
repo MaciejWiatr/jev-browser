@@ -300,6 +300,13 @@ async def jev_run(url: str, goals: list[str], keep_open: bool = False) -> dict:
 
 # ---------- setup / status ----------
 
+def _plugin_version() -> str:
+    try:
+        return json.loads((Path(__file__).resolve().parent.parent / ".claude-plugin" / "plugin.json").read_text())["version"]
+    except (OSError, ValueError, KeyError):
+        return "unknown"
+
+
 def _env_status() -> dict:
     env_file = JEV_HOME / ".env"
     keys = {}
@@ -313,7 +320,8 @@ def _env_status() -> dict:
 
 @mcp.tool()
 async def jev_status(reconnect: bool = False) -> dict:
-    """Connection status like /chrome: browser connection, .env keys (presence only), site rules, open tabs.
+    """Status like /chrome: jev-browser plugin version, browser connection, .env keys (presence only),
+    site rules, open tabs, cursor mode.
     reconnect=true restarts the browser connection (use after 'daemon' or connection errors)."""
     env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
     cmd = ["uv", "run", "--project", str(JEV_HOME), "browser-harness"]
@@ -326,6 +334,8 @@ async def jev_status(reconnect: bool = False) -> dict:
     with bt.LOCK:
         tabs = [t.info() for t in bt.TABS.values()]
     return {
+        "plugin": {"name": "jev-browser", "version": _plugin_version(),
+                   "note": "Jev Ultrafast (the engine in jev_home) has its own, separate version."},
         **_env_status(),
         "browser_harness_doctor": result.stdout.decode(errors="replace"),
         "site_rules": {"file": str(bt.SITES_FILE), **bt.site_rules()},

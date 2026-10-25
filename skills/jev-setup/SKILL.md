@@ -7,7 +7,7 @@ description: Status, reconnect and troubleshooting for the jev browser tools (th
 
 Paths: install `$JEV_HOME` (default `~/.jev/jev-ultrafast`, also found at `~/Apps/jev-ultrafast`), keys `$JEV_HOME/.env`, site rules `~/.config/jev/sites.json`.
 
-1. Call `jev_status`. It shows the Chrome connection, key presence (never values), site rules and this session's tabs.
+1. Call `jev_status`. It shows the jev-browser plugin version (`plugin.version`; answer version questions with this, not the Jev Ultrafast engine's version), the Chrome connection, key presence (never values), site rules and this session's tabs.
 2. Fix by symptom:
    - `DevToolsActivePort not found` / daemon not alive → user turns on `chrome://inspect/#remote-debugging`.
    - Chrome asks "Allow remote debugging?" → user clicks Allow.
