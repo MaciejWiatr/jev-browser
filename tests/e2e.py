@@ -144,6 +144,18 @@ async def main():
         check("memory persisted to disk, encrypted", saved and not any(
             w in f.read_bytes() for f in saved for w in (b"127.0.0.1", b"add to cart", b"Add to cart")), saved)
 
+        # Reading: many pages in one call, main content only, late-rendered content waited for.
+        company = base + "/read/company.html?id="
+        read = await call("get_page_text", urls=[company + i for i in ("alpha", "beta", "gamma")], limit=2000)
+        texts = [p.get("text", "") for p in read["pages"]]
+        check("get_page_text(urls) reads 3 pages in one call", read.get("ok") == 3, read)
+        check("late-rendered content is waited for", all("followers" in t for t in texts), texts)
+        check("main_only drops nav, sidebar and footer", not any(w in t for t in texts
+              for w in ("Skip to search", "People also viewed", "Privacy")), texts)
+        check("temporary reading tabs are closed", len((await call("tabs_context"))["tabs"]) == 1)
+        one = await call("get_page_text", tab_id=tab, url=company + "beta")
+        check("get_page_text(url) opens and reads in one call", "Beta Labs" in one.get("text", ""), one)
+
         await call("tabs_close", tab_id=tab)
         check("tab closed", not (await call("tabs_context"))["tabs"])
 

@@ -1,0 +1,17 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Company</title></head><body>
+<header><nav>Skip to search · Home · Network · Jobs · Messaging · Notifications</nav></header>
+<main id="main"><p>Loading…</p></main>
+<aside>People also viewed: Other Co · Another Co</aside>
+<footer>About · Accessibility · Privacy &amp; Terms</footer>
+<script>
+  // Single-page app style: the real content arrives after load.
+  const id = new URLSearchParams(location.search).get('id') || 'x';
+  const data = {alpha: ['Alpha AI', '16K followers', '51-200 employees'],
+                beta: ['Beta Labs', '18K followers', '201-500 employees'],
+                gamma: ['Gamma Health', '15K followers', '201-500 employees']}[id] || ['Unknown', '0', '0'];
+  setTimeout(() => {
+    document.getElementById('main').innerHTML = `<h1>${data[0]}</h1><p>${data[1]} · ${data[2]}</p><p>Overview of ${data[0]}.</p>`;
+    document.title = data[0];
+  }, 600);
+</script>
+</body></html>

@@ -86,7 +86,7 @@ Claude goes ultra-fast first: it starts with `jev_run`. It falls back to the ste
 | Group | Tools |
 | --- | --- |
 | Tabs | `tabs_context`, `tabs_create`, `tabs_close`, `navigate` (url, back, forward, reload), `resize_window` |
-| Read | `read_page` (elements with refs like `[n12]`, visible text, login/CAPTCHA detection), `get_page_text`, `find` |
+| Read | `read_page` (elements with refs like `[n12]`, visible text, login/CAPTCHA detection), `get_page_text` (`urls=[...]` reads many pages in parallel in one call, main content only), `find` |
 | Act | `computer` (click, type, key, scroll, hover, wait, screenshot, zoom), `form_input`, `javascript_tool`, `file_upload`, `browser_batch` |
 | Memory | `act`, `save_workflow`, `run_workflow`, `site_memory`; `intent=` on `computer` and `form_input` teaches it |
 | Debug | `read_console_messages`, `read_network_requests`, `gif_creator`, `handle_dialog` |

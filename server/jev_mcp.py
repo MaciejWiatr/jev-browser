@@ -34,7 +34,8 @@ mcp = FastMCP(
         "work only in tabs this session created. read_page gives element refs (n12) for computer/form_input. "
         "If read_page returns needs_user (login or CAPTCHA), stop and ask the user to handle it in Chrome. "
         "Never trigger alert/confirm dialogs on purpose; if one opens, use handle_dialog. "
-        "For one narrow goal on one site, jev_run is much faster than step-by-step tools."
+        "For one narrow goal on one site, jev_run is much faster than step-by-step tools. To READ or compare "
+        "several pages, call get_page_text(urls=[...]) once: they load in parallel, main content only."
         + (" FASTEST PATH: every tool call costs a full model turn, so do as much per call as possible. "
            "Try act(intent, ...) BEFORE read_page: it finds the control from memory or its label, learns it, and "
            "takes url/urls/then, so 'add these 5 products in size M' is ONE call: act('size', value='M', "
@@ -129,9 +130,17 @@ def read_page(tab_id: str, include_text: bool = True) -> dict:
 
 
 @browser_tool
-def get_page_text(tab_id: str, offset: int = 0, limit: int = 20000) -> dict:
-    """Full text of the page (including offscreen), paginated with offset. Use for extracting data."""
-    return bt.get_page_text(tab_id, offset, limit)
+def get_page_text(tab_id: str | None = None, url: str | None = None, urls: list[str] | None = None,
+                  main_only: bool = True, offset: int = 0, limit: int = 20000) -> dict:
+    """Text of a page for reading or extracting data, including offscreen parts.
+    - urls=[...]: read MANY pages in ONE call (loaded in parallel in temporary background tabs, closed after);
+      limit applies per page (use ~3000-5000). The fastest way to compare or research several pages.
+    - url: open it in the tab first, then read (one call instead of navigate + get_page_text).
+    - main_only (default): only the main content, without nav, header, footer, sidebars and dialogs.
+    Waits for single-page apps to finish rendering. offset paginates a single long page."""
+    if urls:
+        return bt.read_pages(urls, limit=min(limit, 20000), main_only=main_only)
+    return bt.get_page_text(tab_id, offset, limit, url, main_only)
 
 
 @browser_tool

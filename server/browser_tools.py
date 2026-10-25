@@ -488,11 +488,96 @@ def read_page(tab_id, include_text=True):
     return result
 
 
-def get_page_text(tab_id, offset=0, limit=20000):
+# Main content only: drop site chrome (nav, header, footer, sidebars, dialogs) that costs tokens on every page.
+# The clone is laid out off-screen so innerText keeps real line breaks.
+TEXT_JS = """((mainOnly) => {
+  if (!document.body) return '';
+  if (!mainOnly) return document.body.innerText;
+  const root = document.querySelector('main, [role=main], #main, #content, article') || document.body;
+  const copy = root.cloneNode(true);
+  copy.querySelectorAll('nav, header, footer, aside, dialog, script, style, noscript, svg, [aria-hidden=true], ' +
+    '[role=navigation], [role=banner], [role=contentinfo], [role=complementary], [role=dialog], [hidden]')
+    .forEach(e => e.remove());
+  const box = document.createElement('div');
+  box.style.cssText = 'position:absolute;left:-100000px;top:0;width:' + innerWidth + 'px';
+  box.append(copy);
+  document.body.append(box);
+  const text = box.innerText;
+  box.remove();
+  return text.replace(/\\n{3,}/g, '\\n\\n').trim();
+})"""
+
+
+QUIET_JS = """((quietMs, capMs) => new Promise(resolve => {
+  // Resolve once the DOM has had no mutations for quietMs (single-page apps render after load), or at capMs.
+  let timer;
+  const done = () => { observer.disconnect(); clearTimeout(cap); resolve(true); };
+  const observer = new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(done, quietMs); });
+  observer.observe(document, {subtree: true, childList: true, characterData: true});
+  timer = setTimeout(done, quietMs);
+  const cap = setTimeout(done, capMs);
+}))"""
+
+
+PLACEHOLDER = re.compile(r"^\s*$|^\s*(loading|please wait|ładowanie|wird geladen|chargement)\W*$|^.{0,20}(…|\.\.\.)\s*$",
+                         re.I | re.S)
+
+
+def _settled_text(tab, main_only, timeout=6.0):
+    """Wait for load, then for the DOM to go quiet, then read. Placeholders like 'Loading…' are skipped."""
+    tab.wait_loaded(timeout=timeout)
+    try:
+        tab.evaluate(f"{QUIET_JS}(500, 4000)", await_promise=True)
+    except (ToolError, StalePage):
+        pass  # navigated while waiting: read whatever is there now
+    deadline = time.monotonic() + 4.0
+    while True:
+        try:
+            text = tab.evaluate(f"{TEXT_JS}({json.dumps(main_only)})") or ""
+        except (ToolError, StalePage):
+            text = ""
+        if not PLACEHOLDER.search(text) or time.monotonic() > deadline:
+            return text
+        time.sleep(0.2)
+
+
+def get_page_text(tab_id=None, offset=0, limit=20000, url=None, main_only=True):
+    if tab_id is None:
+        tab_id = next(reversed(TABS), None) or tabs_create("about:blank")["tab_id"]
     tab = get_tab(tab_id)
-    text = tab.evaluate("document.body ? document.body.innerText : ''") or ""
-    return {"url": tab.info()["url"], "text": text[offset:offset + limit], "total_chars": len(text),
-            "next_offset": offset + limit if offset + limit < len(text) else None}
+    if url:
+        tab.navigate(url)
+    text = _settled_text(tab, main_only)
+    return {"url": tab.info()["url"], "title": tab.info()["title"], "text": text[offset:offset + limit],
+            "total_chars": len(text), "next_offset": offset + limit if offset + limit < len(text) else None}
+
+
+def read_pages(urls, limit=4000, main_only=True, parallel=5):
+    """Read many pages in one call: load them side by side in temporary background tabs, then close them."""
+    results = []
+    for start in range(0, len(urls), parallel):
+        batch, tabs = urls[start:start + parallel], []
+        for url in batch:
+            try:
+                check_site(url)
+                tab = Tab("about:blank")
+                tab.call("Page.navigate", url=url if re.match(r"^[a-z][a-z0-9+.-]*:", url) else "https://" + url)
+                tabs.append((url, tab))
+            except Exception as exc:
+                results.append({"url": url, "error": str(exc)})
+        for url, tab in tabs:  # all are loading in parallel; collect each as it settles
+            try:
+                text = _settled_text(tab, main_only)
+                info = tab.info()
+                results.append({"url": info["url"], "title": info["title"], "text": text[:limit],
+                                "total_chars": len(text), "truncated": len(text) > limit})
+            except Exception as exc:
+                results.append({"url": url, "error": str(exc)})
+            finally:
+                TABS.pop(tab.id, None)
+                unregister_session(tab.session)
+                tab.close()
+    return {"pages": results, "ok": sum("error" not in r for r in results), "of": len(urls)}
 
 
 def find(tab_id, query):
