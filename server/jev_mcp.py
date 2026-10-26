@@ -71,7 +71,8 @@ def browser_tool(fn):
                     return {"error": str(exc)}
                 except Exception as exc:
                     return {"error": f"{type(exc).__name__}: {exc}",
-                            "hint": "If this is a connection error, call jev_status with reconnect=true."}
+                            "hint": "Only if this is a connection error, call jev_status with reconnect=true "
+                                    "(it skips the restart when Chrome is still connected)."}
 
         return await anyio.to_thread.run_sync(call)
 
@@ -407,9 +408,12 @@ def _env_status() -> dict:
 async def jev_status(reconnect: bool = False) -> dict:
     """Status like /chrome: jev-browser plugin version, browser connection, .env keys (presence only),
     site rules, open tabs, cursor mode.
-    reconnect=true restarts the browser connection (use after 'daemon' or connection errors)."""
+    reconnect=true restarts the browser connection, but only if it is actually broken: a new connection makes
+    Chrome ask the user 'Allow remote debugging?' again."""
     env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
     cmd = ["uv", "run", "--project", str(JEV_HOME), "browser-harness"]
+    if reconnect and await anyio.to_thread.run_sync(bt.browser_connected):
+        reconnect = False
     if reconnect:
         await anyio.run_process([*cmd, "--reload"], check=False, stderr=subprocess.STDOUT, env=env)
         with bt.LOCK:
@@ -429,7 +433,8 @@ async def jev_status(reconnect: bool = False) -> dict:
         "reconnected": reconnect,
         "fix_hints": [
             "DevToolsActivePort not found -> user enables chrome://inspect/#remote-debugging",
-            "'Allow remote debugging?' prompt in Chrome -> user clicks Allow",
+            "'Allow remote debugging?' prompt in Chrome -> user clicks Allow; Chrome asks once per new connection, "
+            "so expect it after each Chrome restart, not each session",
             "EMPTY key -> user fills it in the .env file; never search for keys elsewhere",
         ],
     }

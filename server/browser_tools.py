@@ -247,6 +247,16 @@ def tabs_context(create_if_empty=False, task=None):
             "note": "Only tabs opened in this session are listed. Use tabs_create for a new one."}
 
 
+def browser_connected():
+    """True when the shared daemon still holds a working connection to Chrome. Each new connection makes Chrome
+    ask 'Allow remote debugging?' again, so only reconnect when this is False."""
+    try:
+        cdp("Target.getTargets", _response_timeout=5)
+        return True
+    except Exception:
+        return False
+
+
 def tabs_create(url="about:blank", activate=False, task=None):
     set_task(task)
     with _quiet():
